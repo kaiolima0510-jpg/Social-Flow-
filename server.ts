@@ -1,6 +1,6 @@
 
 import express from "express";
-import { createServer as createViteServer } from "vite";
+
 import { fetchPendingComments, updateScheduledCommentStatus, getAutoReplyConfig } from "./services/supabaseService";
 import { postComment, sendPrivateReply } from "./services/facebookService";
 import http from "http";
@@ -135,6 +135,7 @@ async function startServer() {
   });
 
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
