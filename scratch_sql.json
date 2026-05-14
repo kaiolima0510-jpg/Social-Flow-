@@ -1,0 +1,13 @@
+﻿
+{"step_index":601,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-05-12T18:53:47Z","conte
+nt":"Excelente! Vou comeÃ§ar a arquitetar o mÃ³dulo **Stealth Leads (CRM & Mensageria)**. \n\nEste serÃ¡ um divisor de 
+Ã¡guas para a plataforma, permitindo nÃ£o apenas postar, mas fechar vendas e gerenciar o relacionamento com os leads 
+diretamente no SocialFlow.\n\nPara comeÃ§armos, criei um **Plano de ImplementaÃ§Ã£o** detalhado. Como nÃ£o tenho 
+permissÃ£o direta para alterar a estrutura do seu banco de dados via comando, **preciso que vocÃª execute o script SQL 
+abaixo no seu painel do Supabase (SQL Editor):**\n\n```sql\n-- 1. Tabela de Leads (Clientes que interagiram)\nCREATE 
+TABLE fb_leads (\n    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),\n    page_id TEXT NOT NULL, \n    psid TEXT NOT 
+NULL,    -- ID Ãºnico do usuÃ¡rio na pÃ¡gina\n    name TEXT,\n    profile_pic TEXT,\n    last_interaction TIMESTAMP 
+WITH TIME ZONE DEFAULT NOW(),\n    status TEXT DEFAULT 'new', -- new, interested, follow_up, converted\n    notes 
+TEXT,\n    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),\n    UNIQUE(page_id, psid)\n);\n\n<truncated 798 bytes>"}
+
+

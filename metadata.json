@@ -1,0 +1,18 @@
+{
+  "name": "SocialFlow Ultra-Blindado v7.2",
+  "description": "Sistema de Publicação com Camada de Ofuscação Binária e Analytics de Engajamento Avançado.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "facebookPermissions": [
+    "read_insights",
+    "publish_video",
+    "pages_show_list",
+    "business_management",
+    "pages_read_engagement",
+    "pages_read_user_content",
+    "pages_manage_posts",
+    "pages_manage_engagement"
+  ]
+}
