@@ -131,7 +131,7 @@ async function startServer() {
                 
                 if (config && config.reply_text) {
                   console.log(`[Webhook] Target Page: ${pageId}, Comment: ${commentId}, Token: ${config.access_token?.substring(0, 10)}...`);
-                  const replyRes = await sendPrivateReply(commentId, config.reply_text, config.access_token);
+                  const replyRes = await sendPrivateReply(commentId, config.reply_text, config.access_token, pageId);
                   if (replyRes && !replyRes.error) {
                     console.log(`[Webhook] SUCCESS: Private reply sent.`);
                   } else {

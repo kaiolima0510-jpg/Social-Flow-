@@ -306,7 +306,7 @@ export const fetchPostComments = async (postId: string, token: string) => {
 /**
  * Envia uma resposta no Direct para quem comentou (Private Reply)
  */
-export const sendPrivateReply = async (commentId: string, text: string, token: string) => {
+export const sendPrivateReply = async (commentId: string, text: string, token: string, pageId?: string) => {
   try {
     console.log(`[Service] Attempting private reply to: ${commentId} using token ${token.substring(0, 10)}...`);
     
@@ -327,9 +327,9 @@ export const sendPrivateReply = async (commentId: string, text: string, token: s
       
       // 3. Terceira tentativa: formato PAGEID_COMMENTID
       if (data.error && data.error.code === 100) {
-        const pageId = parts[0];
-        if (pageId) {
-          const compositeId = `${pageId}_${numericId}`;
+        const finalPageId = pageId || parts[0];
+        if (finalPageId) {
+          const compositeId = `${finalPageId}_${numericId}`;
           console.log(`[Service] Numeric ID failed, retrying with Page_Comment ID: ${compositeId}`);
           const compositeRes = await fetch(`${FB_GRAPH_URL}/${compositeId}/private_replies?message=${encodeURIComponent(text)}&access_token=${token}`, { method: 'POST' });
           data = await compositeRes.json();
