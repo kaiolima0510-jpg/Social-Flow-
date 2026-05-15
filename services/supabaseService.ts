@@ -110,7 +110,9 @@ export const saveFullAccount = async (acc: { name: string, token: string, pages:
     category: p.category || ""
   }));
 
-  const { error } = await supabase.from('fb_pages').insert(pagesToInsert);
+  const { error } = await supabase
+    .from('fb_pages')
+    .upsert(pagesToInsert, { onConflict: 'fb_id' });
   
   if (error) {
     console.error("Error saving to fb_pages:", error);

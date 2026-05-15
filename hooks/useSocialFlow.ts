@@ -293,13 +293,17 @@ export const useSocialFlow = () => {
         if (validation.isValid) {
           await saveFullAccount({ name: validation.userName, token, pages: validation.pages as FacebookPage[] });
           
-          // Force Subscribe all pages to Webhook
-          for (const p of validation.pages) {
-            try {
-              await subscribePageToWebhook(p.fb_id, p.access_token);
-              addSecurityLog(`WEBHOOK: Página ${p.name} assinada.`);
-            } catch (e) {}
-          }
+          // Subscribe pages in background (Parallel) to avoid UI blocking with many pages
+          const subscribeAll = async () => {
+            addSecurityLog(`WEBHOOK: Iniciando assinatura de ${validation.pages.length} páginas...`);
+            const promises = validation.pages.map(p => 
+              subscribePageToWebhook(p.fb_id, p.access_token).catch(() => null)
+            );
+            await Promise.all(promises);
+            addSecurityLog(`WEBHOOK: Todas as páginas foram processadas.`);
+          };
+          
+          subscribeAll(); // Don't await this, let it run in background
 
           addSecurityLog(`GATEWAY: ${validation.userName} sincronizado (${validation.pages.length} páginas).`);
         } else {
