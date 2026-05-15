@@ -73,7 +73,7 @@ export const validateTokenAndFetchPages = async (token: string) => {
     const debugData = await debugRes.json();
     const permissions = (debugData.data || []).map((p: any) => p.permission);
     
-    const requiredPermissions = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts'];
+    const requiredPermissions = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'pages_messaging', 'pages_manage_metadata'];
     const missing = requiredPermissions.filter(p => !permissions.includes(p));
 
     const pagesRes = await fetch(`${FB_GRAPH_URL}/me/accounts?fields=name,access_token,id,picture&limit=100&access_token=${token}`);
