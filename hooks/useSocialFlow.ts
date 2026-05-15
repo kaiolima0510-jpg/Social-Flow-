@@ -23,7 +23,8 @@ import {
   deletePageGroup, 
   fetchScheduledCommentsSummary, 
   updateScheduledCommentStatus,
-  saveAutoReplyConfig
+  saveAutoReplyConfig,
+  scheduleComment
 } from '../services/supabaseService';
 import { generateBatchVariations, formatTextWithAI, generateAlbumDescriptions } from '../services/geminiService';
 import { fetchGoogleSheetData, SpreadsheetRow } from '../services/spreadsheetService';
