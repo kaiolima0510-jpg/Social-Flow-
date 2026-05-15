@@ -71,7 +71,9 @@ export const validateTokenAndFetchPages = async (token: string) => {
 
     const debugRes = await fetch(`${FB_GRAPH_URL}/me/permissions?access_token=${token}`);
     const debugData = await debugRes.json();
-    const permissions = (debugData.data || []).map((p: any) => p.permission);
+    const permissions = (debugData.data || []).filter((p: any) => p.status === 'granted').map((p: any) => p.permission);
+    
+    console.log("[Service] Granted Permissions:", permissions);
     
     const requiredPermissions = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'pages_messaging', 'pages_manage_metadata'];
     const missing = requiredPermissions.filter(p => !permissions.includes(p));
@@ -89,34 +91,13 @@ export const validateTokenAndFetchPages = async (token: string) => {
       }));
     }
 
-    if (pages.length === 0) {
-      try {
-        const checkPageRes = await fetch(`${FB_GRAPH_URL}/${meData.id}?fields=name,access_token,picture&access_token=${token}`);
-        const checkPageData = await checkPageRes.json();
-        if (checkPageData.id && checkPageData.access_token) {
-           pages.push({
-             fb_id: checkPageData.id,
-             name: checkPageData.name,
-             access_token: checkPageData.access_token,
-             picture: checkPageData.picture?.data?.url || ""
-           });
-        }
-      } catch (err) {}
-    }
-
-    if (pages.length === 0) {
-      if (pagesData.error) throw new Error(pagesData.error.message);
-      if (missing.length > 0) {
-        return { 
-          isValid: true, 
-          pages: [], 
-          userName: meData.name,
-          error: `Faltam permissões: ${missing.join(', ')}` 
-        };
-      }
-    }
-
-    return { isValid: true, pages, userName: meData.name };
+    // Mesmo que faltem permissões, retornamos as páginas para não travar o usuário
+    return { 
+      isValid: true, 
+      pages, 
+      userName: meData.name, 
+      error: missing.length > 0 ? `Atenção: Faltam permissões (${missing.join(', ')}). Algumas funções podem falhar.` : undefined 
+    };
   } catch (e: any) { 
     return { isValid: false, pages: [], error: e.message }; 
   }
