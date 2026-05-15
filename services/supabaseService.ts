@@ -286,8 +286,7 @@ export const fetchPendingComments = async () => {
 export const updateScheduledCommentStatus = async (id: string, status: 'completed' | 'failed' | 'pending' | 'processing', error_log?: string, attempts?: number) => {
   const updateData: any = { 
     status, 
-    error_log,
-    updated_at: new Date().toISOString()
+    error_log
   };
   
   if (attempts !== undefined) updateData.attempts = attempts;
