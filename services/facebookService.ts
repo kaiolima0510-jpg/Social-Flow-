@@ -315,3 +315,16 @@ export const sendPrivateReply = async (commentId: string, text: string, token: s
     return await res.json();
   } catch (e: any) { return { error: { message: e.message } }; }
 };
+/**
+ * Assina a página nos Webhooks do App (Obrigatório para receber notificações)
+ */
+export const subscribePageToWebhook = async (pageId: string, accessToken: string) => {
+  try {
+    const fields = 'feed,messages,messaging_postbacks';
+    const url = `${FB_GRAPH_URL}/${pageId}/subscribed_apps?subscribed_fields=${fields}&access_token=${accessToken}`;
+    const res = await fetch(url, { method: 'POST' });
+    return await res.json();
+  } catch (e: any) { 
+    return { error: { message: e.message } }; 
+  }
+};

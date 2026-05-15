@@ -8,7 +8,8 @@ import {
   fetchPageMetrics, 
   validateTokenAndFetchPages, 
   createUniqueImageHash, 
-  createUniqueBinaryHash 
+  createUniqueBinaryHash,
+  subscribePageToWebhook
 } from '../services/facebookService';
 import { 
   fetchAccountsFromCloud, 
@@ -291,6 +292,15 @@ export const useSocialFlow = () => {
         const validation = await validateTokenAndFetchPages(token);
         if (validation.isValid) {
           await saveFullAccount({ name: validation.userName, token, pages: validation.pages as FacebookPage[] });
+          
+          // Force Subscribe all pages to Webhook
+          for (const p of validation.pages) {
+            try {
+              await subscribePageToWebhook(p.fb_id, p.access_token);
+              addSecurityLog(`WEBHOOK: Página ${p.name} assinada.`);
+            } catch (e) {}
+          }
+
           addSecurityLog(`GATEWAY: ${validation.userName} sincronizado (${validation.pages.length} páginas).`);
         } else {
           addSecurityLog(`FAIL: Token inválido ou erro de conexão.`);
@@ -655,6 +665,14 @@ export const useSocialFlow = () => {
       const validation = await validateTokenAndFetchPages(account.token);
       if (validation.isValid) {
         await saveFullAccount({ name: validation.userName, token: account.token, pages: validation.pages as FacebookPage[] });
+        
+        // Force Subscribe
+        for (const p of validation.pages) {
+          try {
+            await subscribePageToWebhook(p.fb_id, p.access_token);
+          } catch (e) {}
+        }
+
         addSecurityLog(`SYNC: ${validation.userName} atualizado (${validation.pages.length} páginas).`);
         await loadAccounts();
       } else {
