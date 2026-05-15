@@ -39,25 +39,29 @@ export const fetchAccountsFromCloud = async () => {
       const accountsMap: Record<string, any> = {};
       
       pagesData.forEach(page => {
-        if (!page) return; // Ignora se a linha estiver vazia
+        if (!page) return;
 
         const accId = page.account_id || 'default';
         if (!accountsMap[accId]) {
           accountsMap[accId] = {
             id: accId,
-            name: "Perfil Conectado",
+            name: page.name || "Perfil Conectado", // Usa o nome da primeira página como base
             token: page.access_token || "",
             pages: []
           };
         }
         
-        // Proteção contra campos nulos
         accountsMap[accId].pages.push({
           fb_id: page.fb_id || page.id || "unknown",
           name: page.name || "Página sem Nome",
           access_token: page.access_token || "",
           category: page.category || "General"
         });
+
+        // Se tiver só uma página, garante que o nome do card seja o nome da página
+        if (accountsMap[accId].pages.length === 1) {
+          accountsMap[accId].name = accountsMap[accId].pages[0].name;
+        }
       });
       
       return Object.values(accountsMap);
