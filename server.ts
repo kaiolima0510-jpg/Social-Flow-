@@ -118,12 +118,12 @@ async function startServer() {
                 let config = await getAutoReplyConfig(fullPostId, pageId);
                 
                 if (config && config.reply_text) {
-                  console.log(`[Webhook] Sending private reply to comment ${commentId}...`);
+                  console.log(`[Webhook] Target Page: ${pageId}, Comment: ${commentId}, Token: ${config.access_token?.substring(0, 10)}...`);
                   const replyRes = await sendPrivateReply(commentId, config.reply_text, config.access_token);
                   if (replyRes && !replyRes.error) {
                     console.log(`[Webhook] SUCCESS: Private reply sent.`);
                   } else {
-                    console.error(`[Webhook] ERROR sending reply:`, replyRes?.error);
+                    console.error(`[Webhook] ERROR sending reply to page ${pageId}:`, replyRes?.error);
                   }
                 }
               } catch (err: any) {
@@ -177,7 +177,7 @@ async function startServer() {
                       }
                     };
 
-                    await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${token}`, {
+                    await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${token}`, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify(cardPayload)

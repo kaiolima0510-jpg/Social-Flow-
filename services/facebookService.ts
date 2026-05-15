@@ -1,7 +1,8 @@
 
 import { FacebookPage } from '../types';
 
-const FB_GRAPH_URL = 'https://graph.facebook.com';
+const FB_GRAPH_URL = 'https://graph.facebook.com/v18.0';
+
 
 const wait = (ms: number) => new Promise(res => setTimeout(res, ms));
 
