@@ -104,31 +104,90 @@ async function startServer() {
       res.status(200).send("EVENT_RECEIVED");
 
       for (const entry of body.entry) {
-        for (const event of entry.changes) {
-          if (event.field === "feed" && event.value.item === "comment" && event.value.verb === "add") {
-            try {
-              const fullPostId = event.value.post_id;
-              const pageId = fullPostId.split('_')[0];
-              const commentId = event.value.comment_id;
+        // 1. Process Feed Changes (Comments)
+        if (entry.changes) {
+          for (const event of entry.changes) {
+            if (event.field === "feed" && event.value.item === "comment" && event.value.verb === "add") {
+              try {
+                const fullPostId = event.value.post_id;
+                const pageId = fullPostId.split('_')[0];
+                const commentId = event.value.comment_id;
 
-              console.log(`[Webhook] New comment received on post: ${fullPostId}. Checking for Auto-Reply...`);
+                console.log(`[Webhook] New comment: ${fullPostId}`);
 
-              // Try to get config (with fallback inside the service)
-              let config = await getAutoReplyConfig(fullPostId, pageId);
-              
-              if (config && config.reply_text) {
-                console.log(`[Webhook] Auto-Reply config found! Sending private reply to comment ${commentId}...`);
-                const replyRes = await sendPrivateReply(commentId, config.reply_text, config.access_token);
-                if (replyRes && !replyRes.error) {
-                   console.log(`[Webhook] SUCCESS: Private reply sent.`);
-                } else {
-                   console.error(`[Webhook] ERROR sending private reply:`, replyRes?.error);
+                let config = await getAutoReplyConfig(fullPostId, pageId);
+                
+                if (config && config.reply_text) {
+                  console.log(`[Webhook] Sending private reply to comment ${commentId}...`);
+                  const replyRes = await sendPrivateReply(commentId, config.reply_text, config.access_token);
+                  if (replyRes && !replyRes.error) {
+                    console.log(`[Webhook] SUCCESS: Private reply sent.`);
+                  } else {
+                    console.error(`[Webhook] ERROR sending reply:`, replyRes?.error);
+                  }
                 }
-              } else {
-                console.log(`[Webhook] Still no Auto-Reply config found for post ${event.value.post_id} even after fallback.`);
+              } catch (err: any) {
+                console.error("[Webhook] Comment Error:", err.message);
               }
-            } catch (err: any) {
-              console.error("[Webhook] Error processing comment event:", err.message);
+            }
+          }
+        }
+
+        // 2. Process Messenger Messaging (SIM Flow)
+        if (entry.messaging) {
+          for (const msgEvent of entry.messaging) {
+            if (msgEvent.message && msgEvent.message.text) {
+              try {
+                const senderId = msgEvent.sender.id;
+                const pageId = msgEvent.recipient.id;
+                const text = msgEvent.message.text.toUpperCase();
+
+                console.log(`[Webhook] Message from ${senderId} on page ${pageId}: ${text}`);
+
+                if (text.includes("SIM")) {
+                  console.log(`[Webhook] 'SIM' detected! Sending recipe card...`);
+                  
+                  const { data: configs } = await supabase
+                    .from('post_auto_replies')
+                    .select('access_token')
+                    .eq('page_id', pageId)
+                    .limit(1);
+
+                  const token = configs?.[0]?.access_token;
+                  if (token) {
+                    const cardPayload = {
+                      recipient: { id: senderId },
+                      message: {
+                        attachment: {
+                          type: "template",
+                          payload: {
+                            template_type: "generic",
+                            elements: [{
+                              title: "Sua receita chegou! 🍳",
+                              image_url: "https://receitasdivinosabor.com.br/wp-content/uploads/2023/04/receita-bolo-maracuja.jpg",
+                              subtitle: "Clique no botão abaixo para ver o passo a passo completo.",
+                              buttons: [{
+                                type: "web_url",
+                                url: "https://social-flow-oo9e.onrender.com",
+                                title: "Ver Receita Completa"
+                              }]
+                            }]
+                          }
+                        }
+                      }
+                    };
+
+                    await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${token}`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(cardPayload)
+                    });
+                    console.log("[Webhook] Card sent successfully!");
+                  }
+                }
+              } catch (e: any) {
+                console.error("[Webhook] Messaging Error:", e.message);
+              }
             }
           }
         }
