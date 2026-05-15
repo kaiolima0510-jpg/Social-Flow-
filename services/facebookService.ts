@@ -312,8 +312,8 @@ export const sendPrivateReply = async (commentId: string, text: string, token: s
     
     // 1. Tenta o ID completo original
     const url = `${FB_GRAPH_URL}/${commentId}/private_replies?message=${encodeURIComponent(text)}&access_token=${token}`;
-    const res = await fetch(url, { method: 'POST' });
-    const data = await res.json();
+    let res = await fetch(url, { method: 'POST' });
+    let data = await res.json();
 
     // 2. Se der erro 100 e o ID tiver um "_", tenta apenas a segunda parte
     if (data.error && data.error.code === 100 && commentId.includes('_')) {
@@ -323,7 +323,18 @@ export const sendPrivateReply = async (commentId: string, text: string, token: s
       
       const retryUrl = `${FB_GRAPH_URL}/${numericId}/private_replies?message=${encodeURIComponent(text)}&access_token=${token}`;
       const retryRes = await fetch(retryUrl, { method: 'POST' });
-      return await retryRes.json();
+      data = await retryRes.json();
+      
+      // 3. Terceira tentativa: formato PAGEID_COMMENTID
+      if (data.error && data.error.code === 100) {
+        const pageId = parts[0];
+        if (pageId) {
+          const compositeId = `${pageId}_${numericId}`;
+          console.log(`[Service] Numeric ID failed, retrying with Page_Comment ID: ${compositeId}`);
+          const compositeRes = await fetch(`${FB_GRAPH_URL}/${compositeId}/private_replies?message=${encodeURIComponent(text)}&access_token=${token}`, { method: 'POST' });
+          data = await compositeRes.json();
+        }
+      }
     }
 
     return data;

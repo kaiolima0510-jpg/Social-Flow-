@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
-const COMMENT_CHECK_INTERVAL = 30000; // 30 seconds
+const COMMENT_CHECK_INTERVAL = 60000; // 60 seconds
 
 async function processComments() {
   const now = new Date();
@@ -68,8 +68,8 @@ async function processComments() {
             await updateScheduledCommentStatus(comment.id, 'pending', errorMsg, nextAttempt);
           }
         }
-        // Small delay between posts to be nice to FB API
-        await new Promise(r => setTimeout(r, 3000));
+        // Delay maior entre postagens para evitar bloqueio por SPAM do Facebook
+        await new Promise(r => setTimeout(r, 8000)); // 8 segundos de pausa
       } catch (e: any) {
         console.error(`[Comment Robot] CRITICAL ERROR for comment ${comment.id}:`, e.message);
         await updateScheduledCommentStatus(comment.id, 'failed', e.message, (comment.attempts || 0) + 1);
