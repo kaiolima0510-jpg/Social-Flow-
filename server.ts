@@ -107,41 +107,14 @@ async function startServer() {
         for (const event of entry.changes) {
           if (event.field === "feed" && event.value.item === "comment" && event.value.verb === "add") {
             try {
+              const fullPostId = event.value.post_id;
+              const pageId = fullPostId.split('_')[0];
               const commentId = event.value.comment_id;
-              let postId = event.value.post_id; // Usually format: pageId_postId
-              
-              if (postId.includes('_')) {
-                 postId = postId.split('_')[1];
-              }
 
-              console.log(`[Webhook] New comment received on post: ${postId}. Checking for Auto-Reply...`);
+              console.log(`[Webhook] New comment received on post: ${fullPostId}. Checking for Auto-Reply...`);
 
-              const pageId = event.value.post_id.split('_')[0];
-
-              // 1. Try searching with the full postId
-              let config = await getAutoReplyConfig(event.value.post_id);
-              
-              // 2. If not found, try with the split ID (just the post part)
-              if (!config && event.value.post_id.includes('_')) {
-                 const splitId = event.value.post_id.split('_')[1];
-                 config = await getAutoReplyConfig(splitId);
-              }
-
-              // 3. ULTIMATE FALLBACK: If still not found, try to find ANY config for this page
-              // This is a "fuzzy" match to handle Facebook's inconsistent IDs
-              if (!config) {
-                console.log(`[Webhook] No exact match for post ${postId}. Trying page fallback for page ${pageId}...`);
-                const { data: pageConfigs } = await supabase
-                  .from('post_auto_replies')
-                  .select('*')
-                  .eq('page_id', pageId)
-                  .limit(1); // Take the first one found for this page as a fallback
-                
-                if (pageConfigs && pageConfigs.length > 0) {
-                  config = pageConfigs[0];
-                  console.log(`[Webhook] Using page-level fallback config for page ${pageId}`);
-                }
-              }
+              // Try to get config (with fallback inside the service)
+              let config = await getAutoReplyConfig(fullPostId, pageId);
               
               if (config && config.reply_text) {
                 console.log(`[Webhook] Auto-Reply config found! Sending private reply to comment ${commentId}...`);

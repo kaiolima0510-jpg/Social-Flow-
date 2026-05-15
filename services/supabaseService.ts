@@ -314,17 +314,32 @@ export const saveAutoReplyConfig = async (pageId: string, fbPostId: string, repl
   }
 };
 
-export const getAutoReplyConfig = async (fbPostId: string) => {
+export const getAutoReplyConfig = async (fbPostId: string, pageId?: string) => {
+  // 1. Try exact match with fbPostId
   const { data, error } = await supabase
     .from('post_auto_replies')
     .select('*')
     .eq('fb_post_id', fbPostId)
     .single();
   
-  if (error) {
-    return null;
+  if (!error && data) {
+    return data;
   }
-  return data;
+
+  // 2. If not found and we have a pageId, try fallback by page_id
+  if (pageId) {
+    const { data: pageConfigs } = await supabase
+      .from('post_auto_replies')
+      .select('*')
+      .eq('page_id', pageId)
+      .limit(1);
+    
+    if (pageConfigs && pageConfigs.length > 0) {
+      return pageConfigs[0];
+    }
+  }
+
+  return null;
 };
 
 // CRM / LEADS
