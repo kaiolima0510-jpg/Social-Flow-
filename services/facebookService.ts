@@ -92,6 +92,23 @@ export const validateTokenAndFetchPages = async (token: string) => {
       }));
     }
 
+    // Caso o token seja de uma PÁGINA individual (Fallback)
+    if (pages.length === 0) {
+      try {
+        const checkPageRes = await fetch(`${FB_GRAPH_URL}/${meData.id}?fields=name,access_token,picture&access_token=${token}`);
+        const p = await checkPageRes.json();
+        if (p.id && p.access_token) {
+           pages.push({
+             fb_id: p.id,
+             name: p.name,
+             access_token: p.access_token,
+             picture: p.picture?.data?.url || ""
+           });
+        }
+      } catch (err) {}
+    }
+
+
     // Mesmo que faltem permissões, retornamos as páginas para não travar o usuário
     return { 
       isValid: true, 
