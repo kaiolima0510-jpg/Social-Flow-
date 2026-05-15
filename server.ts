@@ -34,8 +34,14 @@ async function processComments() {
           continue;
         }
 
-        // LOCK: Mark as processing immediately to avoid duplicates in overlapping cycles
-        await updateScheduledCommentStatus(comment.id, 'processing');
+        // LOCK: Atomic check to avoid duplicates. 
+        // Only proceed if WE were the ones to successfully mark it as 'processing'.
+        const lockAcquired = await updateScheduledCommentStatus(comment.id, 'processing');
+        
+        if (!lockAcquired) {
+          console.log(`[Comment Robot] LOCK FAILED: Comment ${comment.id} already being processed by another instance.`);
+          continue;
+        }
 
         console.log(`[Comment Robot] Attempting to post comment for post ${comment.fb_post_id} (Attempt ${comment.attempts + 1})`);
         

@@ -284,19 +284,37 @@ export const fetchPendingComments = async () => {
 };
 
 export const updateScheduledCommentStatus = async (id: string, status: 'completed' | 'failed' | 'pending' | 'processing', error_log?: string, attempts?: number) => {
+  const updateData: any = { 
+    status, 
+    error_log,
+    updated_at: new Date().toISOString()
+  };
+  
+  if (attempts !== undefined) updateData.attempts = attempts;
+
+  // Se estamos tentando travar como 'processing', fazemos uma checagem atômica
+  if (status === 'processing') {
+    const { data, error } = await supabase
+      .from('scheduled_comments')
+      .update(updateData)
+      .eq('id', id)
+      .eq('status', 'pending') // SÓ trava se ainda estiver pendente
+      .select();
+    
+    if (error) console.error("Erro na trava atômica:", error);
+    return !!(data && data.length > 0);
+  }
+
+  // Para outros status, atualização normal
   const { error } = await supabase
     .from('scheduled_comments')
-    .update({ 
-      status, 
-      error_log,
-      attempts: attempts !== undefined ? attempts : undefined,
-      updated_at: new Date().toISOString()
-    })
+    .update(updateData)
     .eq('id', id);
 
   if (error) {
     console.error("Erro ao atualizar status do comentario agendado:", error);
   }
+  return !error;
 };
 
 export const saveAutoReplyConfig = async (pageId: string, fbPostId: string, replyText: string, token: string) => {
