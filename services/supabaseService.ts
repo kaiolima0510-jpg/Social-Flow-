@@ -283,7 +283,7 @@ export const fetchPendingComments = async () => {
   }
 };
 
-export const updateScheduledCommentStatus = async (id: string, status: 'completed' | 'failed' | 'pending', error_log?: string, attempts?: number) => {
+export const updateScheduledCommentStatus = async (id: string, status: 'completed' | 'failed' | 'pending' | 'processing', error_log?: string, attempts?: number) => {
   const { error } = await supabase
     .from('scheduled_comments')
     .update({ 

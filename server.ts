@@ -28,10 +28,14 @@ async function processComments() {
         const schedTime = new Date(comment.scheduled_time);
         const diffSeconds = (now.getTime() - schedTime.getTime()) / 1000;
         
+        // Wait at least 60 seconds after scheduled time to ensure post is stable
         if (diffSeconds < 60) {
           console.log(`[Comment Robot] Skipping comment for post ${comment.fb_post_id} - too early (${Math.round(diffSeconds)}s since scheduled)`);
           continue;
         }
+
+        // LOCK: Mark as processing immediately to avoid duplicates in overlapping cycles
+        await updateScheduledCommentStatus(comment.id, 'processing');
 
         console.log(`[Comment Robot] Attempting to post comment for post ${comment.fb_post_id} (Attempt ${comment.attempts + 1})`);
         
@@ -54,10 +58,12 @@ async function processComments() {
           if (nextAttempt >= 20) {
             await updateScheduledCommentStatus(comment.id, 'failed', `Max attempts reached: ${errorMsg}`, nextAttempt);
           } else {
+            // Return to pending to try again later
             await updateScheduledCommentStatus(comment.id, 'pending', errorMsg, nextAttempt);
           }
         }
-        await new Promise(r => setTimeout(r, 2000));
+        // Small delay between posts to be nice to FB API
+        await new Promise(r => setTimeout(r, 3000));
       } catch (e: any) {
         console.error(`[Comment Robot] CRITICAL ERROR for comment ${comment.id}:`, e.message);
         await updateScheduledCommentStatus(comment.id, 'failed', e.message, (comment.attempts || 0) + 1);
