@@ -116,14 +116,31 @@ async function startServer() {
 
               console.log(`[Webhook] New comment received on post: ${postId}. Checking for Auto-Reply...`);
 
-              // Try searching with the full postId first
+              const pageId = event.value.post_id.split('_')[0];
+
+              // 1. Try searching with the full postId
               let config = await getAutoReplyConfig(event.value.post_id);
               
-              // If not found and it has an underscore, try with the split ID
+              // 2. If not found, try with the split ID (just the post part)
               if (!config && event.value.post_id.includes('_')) {
                  const splitId = event.value.post_id.split('_')[1];
-                 console.log(`[Webhook] Not found with full ID, trying split ID: ${splitId}`);
                  config = await getAutoReplyConfig(splitId);
+              }
+
+              // 3. ULTIMATE FALLBACK: If still not found, try to find ANY config for this page
+              // This is a "fuzzy" match to handle Facebook's inconsistent IDs
+              if (!config) {
+                console.log(`[Webhook] No exact match for post ${postId}. Trying page fallback for page ${pageId}...`);
+                const { data: pageConfigs } = await supabase
+                  .from('post_auto_replies')
+                  .select('*')
+                  .eq('page_id', pageId)
+                  .limit(1); // Take the first one found for this page as a fallback
+                
+                if (pageConfigs && pageConfigs.length > 0) {
+                  config = pageConfigs[0];
+                  console.log(`[Webhook] Using page-level fallback config for page ${pageId}`);
+                }
               }
               
               if (config && config.reply_text) {
@@ -135,7 +152,7 @@ async function startServer() {
                    console.error(`[Webhook] ERROR sending private reply:`, replyRes?.error);
                 }
               } else {
-                console.log(`[Webhook] No Auto-Reply config found for post ${event.value.post_id}`);
+                console.log(`[Webhook] Still no Auto-Reply config found for post ${event.value.post_id} even after fallback.`);
               }
             } catch (err: any) {
               console.error("[Webhook] Error processing comment event:", err.message);
