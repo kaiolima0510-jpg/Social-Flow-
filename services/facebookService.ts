@@ -309,11 +309,28 @@ export const fetchPostComments = async (postId: string, token: string) => {
  */
 export const sendPrivateReply = async (commentId: string, text: string, token: string) => {
   try {
-    const res = await fetch(`${FB_GRAPH_URL}/${commentId}/private_replies?message=${encodeURIComponent(text)}&access_token=${token}`, {
-      method: 'POST'
-    });
-    return await res.json();
-  } catch (e: any) { return { error: { message: e.message } }; }
+    console.log(`[Service] Attempting private reply to: ${commentId} using token ${token.substring(0, 10)}...`);
+    
+    // 1. Tenta o ID completo original
+    const url = `${FB_GRAPH_URL}/${commentId}/private_replies?message=${encodeURIComponent(text)}&access_token=${token}`;
+    const res = await fetch(url, { method: 'POST' });
+    const data = await res.json();
+
+    // 2. Se der erro 100 e o ID tiver um "_", tenta apenas a segunda parte
+    if (data.error && data.error.code === 100 && commentId.includes('_')) {
+      const parts = commentId.split('_');
+      const numericId = parts[parts.length - 1]; // Pega a última parte
+      console.log(`[Service] Full ID failed, retrying with numeric ID: ${numericId}`);
+      
+      const retryUrl = `${FB_GRAPH_URL}/${numericId}/private_replies?message=${encodeURIComponent(text)}&access_token=${token}`;
+      const retryRes = await fetch(retryUrl, { method: 'POST' });
+      return await retryRes.json();
+    }
+
+    return data;
+  } catch (e: any) { 
+    return { error: { message: e.message } }; 
+  }
 };
 /**
  * Assina a página nos Webhooks do App (Obrigatório para receber notificações)
