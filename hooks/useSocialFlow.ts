@@ -289,25 +289,30 @@ export const useSocialFlow = () => {
     try {
       const tokens = tokenInput.split('\n').map(t => cleanToken(t)).filter(t => t.length > 10);
       for (const token of tokens) {
-        const validation = await validateTokenAndFetchPages(token);
-        if (validation.isValid) {
-          await saveFullAccount({ name: validation.userName, token, pages: validation.pages as FacebookPage[] });
-          
-          // Subscribe pages in background (Parallel) to avoid UI blocking with many pages
-          const subscribeAll = async () => {
-            addSecurityLog(`WEBHOOK: Iniciando assinatura de ${validation.pages.length} páginas...`);
-            const promises = validation.pages.map(p => 
-              subscribePageToWebhook(p.fb_id, p.access_token).catch(() => null)
-            );
-            await Promise.all(promises);
-            addSecurityLog(`WEBHOOK: Todas as páginas foram processadas.`);
-          };
-          
-          subscribeAll(); // Don't await this, let it run in background
+        try {
+          const validation = await validateTokenAndFetchPages(token);
+          if (validation.isValid) {
+            await saveFullAccount({ name: validation.userName, token, pages: validation.pages as FacebookPage[] });
+            
+            // Subscribe pages in background (Parallel) to avoid UI blocking
+            const subscribeAll = async () => {
+              addSecurityLog(`WEBHOOK: Iniciando assinatura de ${validation.pages.length} páginas...`);
+              const promises = validation.pages.map(p => 
+                subscribePageToWebhook(p.fb_id, p.access_token).catch(() => null)
+              );
+              await Promise.all(promises);
+              addSecurityLog(`WEBHOOK: Todas as páginas de ${validation.userName} foram processadas.`);
+            };
+            
+            subscribeAll();
 
-          addSecurityLog(`GATEWAY: ${validation.userName} sincronizado (${validation.pages.length} páginas).`);
-        } else {
-          addSecurityLog(`FAIL: Token inválido ou erro de conexão.`);
+            addSecurityLog(`GATEWAY: ${validation.userName} sincronizado (${validation.pages.length} páginas).`);
+          } else {
+            addSecurityLog(`FAIL: ${validation.error || 'Token inválido'}`);
+          }
+        } catch (err: any) {
+          addSecurityLog(`ERRO FATAL: ${err.message}`);
+          console.error("Import Error:", err);
         }
       }
       await loadAccounts();

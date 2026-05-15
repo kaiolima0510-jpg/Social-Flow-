@@ -99,7 +99,6 @@ export const deleteAccountFromCloud = async (id: string) => {
 };
 
 export const saveFullAccount = async (acc: { name: string, token: string, pages: any[] }) => {
-  // Salvamos no formato novo (fb_pages) para manter a consistência com o que o usuário já tem
   const accountId = crypto.randomUUID();
   
   const pagesToInsert = acc.pages.map(p => ({
@@ -116,13 +115,7 @@ export const saveFullAccount = async (acc: { name: string, token: string, pages:
   
   if (error) {
     console.error("Error saving to fb_pages:", error);
-    // Fallback para fb_accounts
-    await supabase.from('fb_accounts').upsert({
-      name: acc.name,
-      token: acc.token,
-      pages: acc.pages,
-      last_sync: new Date().toISOString()
-    }, { onConflict: 'token' });
+    throw new Error(`Erro no Banco: ${error.message}`);
   }
 
   return { id: accountId, name: acc.name };
