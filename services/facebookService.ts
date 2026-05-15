@@ -336,7 +336,7 @@ export const sendPrivateReply = async (commentId: string, text: string, token: s
  */
 export const subscribePageToWebhook = async (pageId: string, accessToken: string) => {
   try {
-    const fields = 'feed,messages,messaging_postbacks';
+    const fields = 'feed,messages,messaging_postbacks,messaging_optins,message_deliveries';
     const url = `${FB_GRAPH_URL}/${pageId}/subscribed_apps?subscribed_fields=${fields}&access_token=${accessToken}`;
     const res = await fetch(url, { method: 'POST' });
     return await res.json();
