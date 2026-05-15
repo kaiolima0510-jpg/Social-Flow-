@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx --env-file=.env server.ts",
+    "start": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit"

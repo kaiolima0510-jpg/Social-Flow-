@@ -4,6 +4,11 @@ import express from "express";
 import { fetchPendingComments, updateScheduledCommentStatus, getAutoReplyConfig } from "./services/supabaseService";
 import { postComment, sendPrivateReply } from "./services/facebookService";
 import http from "http";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
 const COMMENT_CHECK_INTERVAL = 30000; // 30 seconds
@@ -142,9 +147,10 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static("dist"));
+    const distPath = path.join(__dirname, "dist");
+    app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile("index.html", { root: "dist" });
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
@@ -166,4 +172,7 @@ async function startServer() {
   process.on("SIGINT", shutdown);
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("CRITICAL ERROR DURING SERVER STARTUP:", err);
+  process.exit(1);
+});
