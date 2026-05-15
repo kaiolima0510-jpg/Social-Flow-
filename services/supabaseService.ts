@@ -105,9 +105,9 @@ export const saveFullAccount = async (acc: { name: string, token: string, pages:
     account_id: accountId,
     fb_id: p.fb_id,
     name: p.name,
-    access_token: p.access_token || acc.token,
+    access_token: p.access_token, // Obrigatório ser o token da página
     category: p.category || ""
-  }));
+  })).filter(p => !!p.access_token); // Remove páginas que não retornaram token próprio
 
   const { error } = await supabase
     .from('fb_pages')
