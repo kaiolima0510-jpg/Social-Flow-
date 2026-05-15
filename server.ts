@@ -116,8 +116,15 @@ async function startServer() {
 
               console.log(`[Webhook] New comment received on post: ${postId}. Checking for Auto-Reply...`);
 
-              // Check if we have an auto-reply configured for this post
-              const config = await getAutoReplyConfig(postId);
+              // Try searching with the full postId first
+              let config = await getAutoReplyConfig(event.value.post_id);
+              
+              // If not found and it has an underscore, try with the split ID
+              if (!config && event.value.post_id.includes('_')) {
+                 const splitId = event.value.post_id.split('_')[1];
+                 console.log(`[Webhook] Not found with full ID, trying split ID: ${splitId}`);
+                 config = await getAutoReplyConfig(splitId);
+              }
               
               if (config && config.reply_text) {
                 console.log(`[Webhook] Auto-Reply config found! Sending private reply to comment ${commentId}...`);
@@ -127,6 +134,8 @@ async function startServer() {
                 } else {
                    console.error(`[Webhook] ERROR sending private reply:`, replyRes?.error);
                 }
+              } else {
+                console.log(`[Webhook] No Auto-Reply config found for post ${event.value.post_id}`);
               }
             } catch (err: any) {
               console.error("[Webhook] Error processing comment event:", err.message);
