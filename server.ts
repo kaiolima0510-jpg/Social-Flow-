@@ -58,10 +58,21 @@ async function processComments() {
           await updateScheduledCommentStatus(comment.id, 'completed');
         } else {
           const errorMsg = res?.error?.message || JSON.stringify(res?.error) || "Unknown error";
+          const nextAttempt = (comment.attempts || 0) + 1;
           console.log(`[Comment Robot] FAIL: ${errorMsg} for post ${comment.fb_post_id}`);
           
-          const nextAttempt = (comment.attempts || 0) + 1;
-          if (nextAttempt >= 20) {
+          // Se for erro de SPAM/Frequência, esperar 1 hora para a próxima tentativa
+          if (errorMsg.toLowerCase().includes('frequência') || errorMsg.toLowerCase().includes('spam') || errorMsg.toLowerCase().includes('limit')) {
+            const oneHourLater = new Date(Date.now() + 60 * 60 * 1000);
+            console.log(`[Comment Robot] Rate limit detected. Rescheduling for: ${oneHourLater.toISOString()}`);
+            await supabase.from('scheduled_comments')
+              .update({ 
+                status: 'pending', 
+                attempts: nextAttempt,
+                scheduled_at: oneHourLater.toISOString() 
+              })
+              .eq('id', comment.id);
+          } else if (nextAttempt >= 20) {
             await updateScheduledCommentStatus(comment.id, 'failed', `Max attempts reached: ${errorMsg}`, nextAttempt);
           } else {
             // Return to pending to try again later
