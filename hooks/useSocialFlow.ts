@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Tab, FacebookAccount, FacebookPage, PostType, PageGroup, QueueItem } from '../types';
 import { 
   cleanToken, 
@@ -29,6 +29,34 @@ import {
 } from '../services/supabaseService';
 import { generateBatchVariations, formatTextWithAI, generateAlbumDescriptions } from '../services/geminiService';
 import { fetchGoogleSheetData, SpreadsheetRow } from '../services/spreadsheetService';
+
+export const parseSpintax = (text: string): string => {
+  if (!text) return text;
+  let parsed = text;
+  while (/{[^{}]+}/.test(parsed)) {
+    parsed = parsed.replace(/{([^{}]+)}/g, (match, contents) => {
+      const choices = contents.split('|');
+      return choices[Math.floor(Math.random() * choices.length)];
+    });
+  }
+  return parsed;
+};
+
+const executeWithBackoff = async (fn: () => Promise<any>, logFn: (msg: string) => void) => {
+  let attempts = 0;
+  while (attempts < 3) {
+    const res = await fn();
+    const errorCode = res?.code || res?.error?.code;
+    if (errorCode === 613 || errorCode === 368 || errorCode === 4 || errorCode === 17) {
+      attempts++;
+      logFn(`RATE LIMIT: Bloqueio (Erro ${errorCode}). Pausa de 60-120s (Tentativa ${attempts}/3)...`);
+      await new Promise(r => setTimeout(r, (60 * 1000) + Math.random() * (60 * 1000)));
+      if (attempts >= 3) return res;
+    } else {
+      return res;
+    }
+  }
+};
 
 export const useSocialFlow = () => {
   const [activeTab, setActiveTab] = useState<Tab>(Tab.DASHBOARD);
@@ -74,6 +102,7 @@ export const useSocialFlow = () => {
   const [bulkFiles, setBulkFiles] = useState<Map<string, { file: File, preview: string }>>(new Map());
   const [isSyncingSheet, setIsSyncingSheet] = useState(false);
   const [bulkType, setBulkType] = useState<PostType>('SINGLE');
+  const [enableRotation, setEnableRotation] = useState(false);
 
   // ===== POST QUEUE =====
   const [postQueue, setPostQueue] = useState<QueueItem[]>([]);
@@ -244,7 +273,8 @@ export const useSocialFlow = () => {
           };
           setManualData(prev => ({ 
             ...prev, 
-            media: prev.type === 'ALBUM' ? [...prev.media, newMedia] : [newMedia] 
+            media: prev.type === 'ALBUM' ? [...prev.media, newMedia] : [newMedia],
+            type: prev.type === 'VIDEO' ? 'SINGLE' : prev.type
           }));
           addSecurityLog("MEDIA: Imagem colada da área de transferência.");
         }
@@ -283,16 +313,28 @@ export const useSocialFlow = () => {
     setSelectedPageIds(newSet);
   };
 
-  const syncTokens = async () => {
-    if (!tokenInput) return;
+  const syncTokens = async (): Promise<{ successes: string[], errors: string[], totalImported: number }> => {
+    if (!tokenInput) return { successes: [], errors: [], totalImported: 0 };
     setIsProcessing(true);
+    let totalImported = 0;
+    const errors: string[] = [];
+    const successes: string[] = [];
+
     try {
       const tokens = tokenInput.split('\n').map(t => cleanToken(t)).filter(t => t.length > 10);
       for (const token of tokens) {
         try {
           const validation = await validateTokenAndFetchPages(token);
           if (validation.isValid) {
+            if (validation.pages.length === 0) {
+              errors.push(`O token de "${validation.userName}" não retornou nenhuma página. Verifique se o token possui permissões ativas de administrador de páginas.`);
+              addSecurityLog(`FAIL: O token de "${validation.userName}" retornou 0 páginas.`);
+              continue;
+            }
+
             await saveFullAccount({ name: validation.userName, token, pages: validation.pages as FacebookPage[] });
+            totalImported += validation.pages.length;
+            successes.push(`✅ "${validation.userName}" — ${validation.pages.length} página(s) conectada(s).`);
             
             // Subscribe pages in background (Parallel) to avoid UI blocking
             const subscribeAll = async () => {
@@ -308,16 +350,19 @@ export const useSocialFlow = () => {
 
             addSecurityLog(`GATEWAY: ${validation.userName} sincronizado (${validation.pages.length} páginas).`);
           } else {
+            errors.push(`❌ Token inválido: ${validation.error || 'Erro desconhecido'}`);
             addSecurityLog(`FAIL: ${validation.error || 'Token inválido'}`);
           }
         } catch (err: any) {
+          errors.push(`❌ Falha ao processar token: ${err.message}`);
           addSecurityLog(`ERRO FATAL: ${err.message}`);
           console.error("Import Error:", err);
         }
       }
       await loadAccounts();
       setTokenInput("");
-      setIsImportModalOpen(false);
+      // Modal stays open to show the result — ImportModal will auto-close after displaying feedback
+      return { successes, errors, totalImported };
     } finally { setIsProcessing(false); }
   };
 
@@ -357,101 +402,135 @@ export const useSocialFlow = () => {
       };
     });
     
-    setManualData(prev => ({ 
-      ...prev, 
-      media: prev.type === 'ALBUM' ? [...prev.media, ...newMedia] : newMedia 
-    }));
+    setManualData(prev => {
+      const updatedMedia = prev.type === 'ALBUM' ? [...prev.media, ...newMedia] : newMedia;
+      let updatedType = prev.type;
+      
+      if (newMedia.length > 0) {
+        const firstIsVideo = newMedia[0].type === 'VIDEO';
+        if (firstIsVideo && prev.type !== 'STORY') {
+          updatedType = 'VIDEO';
+        } else if (!firstIsVideo && prev.type === 'VIDEO') {
+          updatedType = 'SINGLE';
+        }
+      }
+      
+      return { 
+        ...prev, 
+        media: updatedMedia,
+        type: updatedType
+      };
+    });
   };
 
   const handleRunBulk = async () => {
     const matchedRows = sheetRows.filter(r => bulkFiles.has(r.fileName));
     if (matchedRows.length === 0) return alert("Nenhum arquivo local coincide com a planilha.");
     const activePages = accounts.flatMap(acc => (acc.pages || []).map(p => ({ ...p, parentToken: acc.token })))
-      .filter(p => selectedPageIds.has(p.fb_id));
+      .filter(p => selectedPageIds.has(p.fb_id))
+      .sort(() => Math.random() - 0.5);
     if (activePages.length === 0) return alert("Selecione ao menos uma página.");
 
     setIsProcessing(true);
     setProgress({ current: 0, total: matchedRows.length * activePages.length });
 
     try {
-      for (const row of matchedRows) {
-        const fileData = bulkFiles.get(row.fileName)!;
+      let allVariations: string[][] = [];
+      let allCommentVariations: string[][] = [];
+      
+      if (useAI && bulkType !== 'STORY') {
+        for (let r = 0; r < matchedRows.length; r++) {
+           addSecurityLog(`IA: Gerando variações para linha ${r+1}...`);
+           try {
+             const aiRes = await generateBatchVariations(matchedRows[r].caption, activePages.length);
+             allVariations[r] = aiRes.variations || [];
+             if (matchedRows[r].comment) {
+                const cmtAiRes = await generateBatchVariations(matchedRows[r].comment, activePages.length);
+                allCommentVariations[r] = cmtAiRes.variations || [];
+             } else {
+                allCommentVariations[r] = [];
+             }
+           } catch (e) {
+             allVariations[r] = [];
+             allCommentVariations[r] = [];
+           }
+        }
+      }
+
+      for (let r = 0; r < matchedRows.length; r++) {
+        const timeRow = matchedRows[r];
+        const schedDate = timeRow.scheduledDate ? new Date(timeRow.scheduledDate) : null;
+        const sched = schedDate ? Math.floor(schedDate.getTime() / 1000) : undefined;
+        
         const historyId = await logPostHistory({ 
-          main_caption: row.caption, 
-          first_comment: row.comment, 
-          target_group: 'Bulk', 
+          main_caption: timeRow.caption, 
+          first_comment: timeRow.comment, 
+          target_group: enableRotation ? 'Bulk (Matrix)' : 'Bulk', 
           post_type: bulkType 
         });
 
-        let variations: string[] = [];
-        let commentVariations: string[] = [];
-        
-        if (useAI && bulkType !== 'STORY') {
-          try {
-            addSecurityLog("IA: Gerando variações de legenda...");
-            const aiRes = await generateBatchVariations(row.caption, activePages.length);
-            variations = aiRes.variations;
-            
-            if (row.comment) {
-              addSecurityLog("IA: Gerando variações de comentário...");
-              const cmtAiRes = await generateBatchVariations(row.comment, activePages.length);
-              commentVariations = cmtAiRes.variations;
-            }
-          } catch (e) {}
-        }
-
-
         for (let i = 0; i < activePages.length; i++) {
+          if (i > 0 && i % 20 === 0) {
+            addSecurityLog("PAUSA: Macro-Delay ativado. Descansando por 3 a 5 minutos...");
+            await new Promise(res => setTimeout(res, (3 * 60 * 1000) + Math.random() * (2 * 60 * 1000)));
+          }
+
           const page = activePages[i];
           setProgress(p => ({ ...p, current: p.current + 1 }));
           
-          const finalCaption = (useAI && variations[i]) ? variations[i] : row.caption;
-          const finalComment = (useAI && commentVariations[i]) ? commentVariations[i] : row.comment;
+          const blockIndex = Math.floor(i / 10);
+          const contentRowIndex = enableRotation ? (r + blockIndex) % matchedRows.length : r;
+          const contentRow = matchedRows[contentRowIndex];
+          const fileData = bulkFiles.get(contentRow.fileName)!;
+          
+          let finalCaption = (useAI && allVariations[contentRowIndex]?.[i]) ? allVariations[contentRowIndex][i] : contentRow.caption;
+          let finalComment = (useAI && allCommentVariations[contentRowIndex]?.[i]) ? allCommentVariations[contentRowIndex][i] : contentRow.comment;
+
+          finalCaption = parseSpintax(finalCaption);
+          if (finalComment) finalComment = parseSpintax(finalComment);
 
           const uniqueBlob = fileData.file.type.startsWith('video') 
             ? await createUniqueBinaryHash(fileData.file) 
             : await createUniqueImageHash(fileData.file, bulkType === 'STORY');
           
-          const schedDate = row.scheduledDate ? new Date(row.scheduledDate) : null;
-          const sched = schedDate ? Math.floor(schedDate.getTime() / 1000) : undefined;
-          
-          const res = await postToFacebook(
+          const res = await executeWithBackoff(() => postToFacebook(
             page.access_token || page.parentToken, 
             page.fb_id, 
             finalCaption, 
             [{ blob: uniqueBlob, description: "" }], 
             sched, 
             bulkType,
-            bulkType === 'STORY' ? row.comment : undefined
-          );
+            bulkType === 'STORY' ? contentRow.comment : undefined
+          ), addSecurityLog);
 
           await logPublication(historyId, page.fb_id, res.success ? 'success' : 'error', res.error || 'OK', res.id, useAI ? 100 : 0);
           
-          if (res.success && row.comment && bulkType !== 'STORY') {
+          if (res.success && contentRow.comment && bulkType !== 'STORY') {
             if (sched) {
               await scheduleComment({
                 page_id: page.fb_id,
                 access_token: page.access_token || page.parentToken,
                 fb_post_id: res.id!,
-                comment_text: row.comment,
+                comment_text: contentRow.comment,
                 scheduled_time: schedDate!.toISOString()
               });
               addSecurityLog(`CMT: Comentário agendado para ${page.name}.`);
-            } else if (manualData.commentDelay > 0) {
-              const futureTime = new Date(Date.now() + manualData.commentDelay * 60000);
+            } else if ((manualData.comments?.[0]?.delay || 0) > 0) {
+              const delayMin = manualData.comments[0].delay;
+              const futureTime = new Date(Date.now() + delayMin * 60000);
               await scheduleComment({
                 page_id: page.fb_id,
                 access_token: page.access_token || page.parentToken,
                 fb_post_id: res.id!,
-                comment_text: row.comment,
+                comment_text: contentRow.comment,
                 scheduled_time: futureTime.toISOString()
               });
-              addSecurityLog(`CMT: Robot agendado (${manualData.commentDelay}min) em ${page.name}.`);
+              addSecurityLog(`CMT: Robot agendado (${delayMin}min) em ${page.name}.`);
             } else {
               const propagationDelay = 2000 + Math.random() * 2000;
               await new Promise(r => setTimeout(r, propagationDelay));
 
-              const cmtRes = await postComment(page.access_token || page.parentToken, res.id!, finalComment);
+              const cmtRes = await executeWithBackoff(() => postComment(page.access_token || page.parentToken, res.id!, finalComment), addSecurityLog);
 
               if (cmtRes.id) {
                 addSecurityLog(`CMT: Comentário postado em ${page.name}.`);
@@ -509,10 +588,16 @@ export const useSocialFlow = () => {
       });
 
       for (let i = 0; i < item.pages.length; i++) {
+        if (i > 0 && i % 20 === 0) {
+          log("PAUSA: Macro-Delay ativado. Descansando por 3 a 5 minutos...");
+          await new Promise(r => setTimeout(r, (3 * 60 * 1000) + Math.random() * (2 * 60 * 1000)));
+        }
+
         const page = item.pages[i];
         setItemProgress(i + 1);
 
-        const finalCaption = (item.useAI && variations[i]) ? variations[i] : item.caption;
+        let finalCaption = (item.useAI && variations[i]) ? variations[i] : item.caption;
+        finalCaption = parseSpintax(finalCaption);
         const schedDate = new Date(item.scheduledDate);
         const sched = item.isScheduled ? Math.floor(schedDate.getTime() / 1000) : undefined;
 
@@ -523,7 +608,7 @@ export const useSocialFlow = () => {
           description: m.description
         })));
 
-        const res = await postToFacebook(
+        const res = await executeWithBackoff(() => postToFacebook(
           page.access_token || page.parentToken,
           page.fb_id,
           finalCaption,
@@ -531,7 +616,7 @@ export const useSocialFlow = () => {
           sched,
           item.type,
           item.type === 'STORY' ? item.storyLink : undefined
-        );
+        ), log);
 
         await logPublication(historyId, page.fb_id, res.success ? 'success' : 'error', res.error || 'OK', res.id, item.useAI ? 100 : 0);
 
@@ -546,8 +631,9 @@ export const useSocialFlow = () => {
           if (item.comments && item.comments.length > 0 && item.type !== 'STORY') {
             for (let c = 0; c < item.comments.length; c++) {
               const cmt = item.comments[c];
-              const cmtText = (c === 0 && item.useAI && commentVariations[i]) ? commentVariations[i] : cmt.text;
+              let cmtText = (c === 0 && item.useAI && commentVariations[i]) ? commentVariations[i] : cmt.text;
               if (!cmtText.trim()) continue;
+              cmtText = parseSpintax(cmtText);
 
               if (sched) {
                 await scheduleComment({ page_id: page.fb_id, access_token: page.access_token || page.parentToken, fb_post_id: res.id!, comment_text: cmtText, scheduled_time: schedDate.toISOString() });
@@ -559,7 +645,7 @@ export const useSocialFlow = () => {
               } else {
                 const propagationDelay = 2000 + Math.random() * 2000;
                 await new Promise(r => setTimeout(r, propagationDelay));
-                const cmtRes = await postComment(page.access_token || page.parentToken, res.id!, cmtText);
+                const cmtRes = await executeWithBackoff(() => postComment(page.access_token || page.parentToken, res.id!, cmtText), log);
                 if (cmtRes.id) log(`CMT: Comentário em ${page.name}.`);
                 else log(`FAIL CMT: ${page.name}: ${(cmtRes.error?.message || '').substring(0, 30)}`);
               }
@@ -599,7 +685,8 @@ export const useSocialFlow = () => {
     if (manualData.media.length === 0) return alert('Escolha uma imagem ou vídeo.');
     const activePages = accounts
       .flatMap(acc => (acc.pages || []).map(p => ({ ...p, parentToken: acc.token })))
-      .filter(p => selectedPageIds.has(p.fb_id));
+      .filter(p => selectedPageIds.has(p.fb_id))
+      .sort(() => Math.random() - 0.5);
     if (activePages.length === 0) return alert('Selecione ao menos um conjunto/página.');
 
     const selectedGroup = pageGroups.find(g =>
@@ -717,6 +804,7 @@ export const useSocialFlow = () => {
     bulkFiles, handleBulkFilesUpload,
     isSyncingSheet, handleSyncSheet,
     bulkType, setBulkType, handleRunBulk,
+    enableRotation, setEnableRotation,
     manualData, setManualData, handleMagicFormat, handleGenerateAlbumDescriptions, handleMediaUpload,
     handleAction: addToQueue,
     postQueue, removeFromQueue, clearCompletedFromQueue,

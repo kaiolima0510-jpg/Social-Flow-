@@ -8,6 +8,7 @@ export interface FacebookPage {
   account_id: string;
   health_status?: 'healthy' | 'warning' | 'critical';
   last_post_at?: string;
+  picture?: string;
 }
 
 export type AccountGroup = string;

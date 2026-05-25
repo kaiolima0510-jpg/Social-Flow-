@@ -103,26 +103,78 @@ export const deleteAccountFromCloud = async (id: string) => {
 };
 
 export const saveFullAccount = async (acc: { name: string, token: string, pages: any[] }) => {
-  const accountId = crypto.randomUUID();
-  
-  const pagesToInsert = acc.pages.map(p => ({
-    account_id: accountId,
-    fb_id: p.fb_id,
-    name: p.name,
-    access_token: p.access_token, // Obrigatório ser o token da página
-    category: p.category || ""
-  })).filter(p => !!p.access_token); // Remove páginas que não retornaram token próprio
+  try {
+    // 1. Busca o primeiro account_id válido que já existe na tabela fb_pages para satisfazer a chave estrangeira (foreign key)
+    const { data: existingPages } = await supabase
+      .from('fb_pages')
+      .select('account_id')
+      .limit(1);
+      
+    // Usa o primeiro ID encontrado ou um fallback padrão seguro que já está na tabela de fb_accounts
+    const accountId = existingPages?.[0]?.account_id || 'e4f4c03e-f540-407e-ac94-64b6eb619e67';
 
-  const { error } = await supabase
-    .from('fb_pages')
-    .upsert(pagesToInsert, { onConflict: 'fb_id' });
-  
-  if (error) {
-    console.error("Error saving to fb_pages:", error);
-    throw new Error(`Erro no Banco: ${error.message}`);
+    const pagesToInsert = acc.pages.map(p => ({
+      account_id: accountId,
+      fb_id: p.fb_id,
+      name: p.name,
+      access_token: p.access_token,
+      category: p.category || ""
+    })).filter(p => !!p.access_token);
+
+    for (const page of pagesToInsert) {
+      // 2. Verifica se a página com esse fb_id já existe na base
+      const { data: existing, error: fetchError } = await supabase
+        .from('fb_pages')
+        .select('id')
+        .eq('fb_id', page.fb_id)
+        .maybeSingle();
+
+      if (fetchError) {
+        console.error(`[Supabase] Erro ao buscar página ${page.fb_id}:`, fetchError);
+      }
+
+      if (existing) {
+        // 3. Se existe, atualiza os dados da página
+        console.log(`[Supabase] Atualizando página existente: ${page.name} (${page.fb_id})`);
+        const { error: updateError } = await supabase
+          .from('fb_pages')
+          .update({
+            name: page.name,
+            access_token: page.access_token,
+            category: page.category
+          })
+          .eq('fb_id', page.fb_id);
+        
+        if (updateError) {
+          console.error(`[Supabase] Erro ao atualizar página ${page.fb_id}:`, updateError);
+          throw new Error(updateError.message);
+        }
+      } else {
+        // 4. Se não existe, insere a nova página com UUID próprio
+        console.log(`[Supabase] Inserindo nova página: ${page.name} (${page.fb_id})`);
+        const { error: insertError } = await supabase
+          .from('fb_pages')
+          .insert({
+            id: crypto.randomUUID(),
+            account_id: page.account_id,
+            fb_id: page.fb_id,
+            name: page.name,
+            access_token: page.access_token,
+            category: page.category
+          });
+        
+        if (insertError) {
+          console.error(`[Supabase] Erro ao inserir nova página ${page.fb_id}:`, insertError);
+          throw new Error(insertError.message);
+        }
+      }
+    }
+
+    return { id: accountId, name: acc.name };
+  } catch (err: any) {
+    console.error("Error in saveFullAccount:", err);
+    throw new Error(`Erro no Banco: ${err.message}`);
   }
-
-  return { id: accountId, name: acc.name };
 };
 
 export const logPostHistory = async (post: any) => {

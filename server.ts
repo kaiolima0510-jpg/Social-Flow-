@@ -1,7 +1,7 @@
 
 import express from "express";
 
-import { fetchPendingComments, updateScheduledCommentStatus, getAutoReplyConfig } from "./services/supabaseService";
+import { fetchPendingComments, updateScheduledCommentStatus, getAutoReplyConfig, supabase } from "./services/supabaseService";
 import { postComment, sendPrivateReply } from "./services/facebookService";
 import http from "http";
 import path from "path";
@@ -138,6 +138,8 @@ async function startServer() {
 
                 console.log(`[Webhook] New comment: ${fullPostId}`);
 
+                // Respostas privadas desativadas temporariamente conforme solicitação do usuário
+                /*
                 let config = await getAutoReplyConfig(fullPostId, pageId);
                 
                 if (config && config.reply_text) {
@@ -149,6 +151,8 @@ async function startServer() {
                     console.error(`[Webhook] ERROR sending reply to page ${pageId}:`, replyRes?.error);
                   }
                 }
+                */
+                console.log(`[Webhook] Novo comentário recebido em ${fullPostId}. (Respostas privadas desativadas)`);
               } catch (err: any) {
                 console.error("[Webhook] Comment Error:", err.message);
               }

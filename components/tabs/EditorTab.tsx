@@ -42,6 +42,8 @@ interface EditorTabProps {
   bulkType: PostType;
   setBulkType: (t: PostType) => void;
   handleRunBulk: () => void;
+  enableRotation: boolean;
+  setEnableRotation: (b: boolean) => void;
   sheetRows: any[];
   setSheetRows: (r: any[]) => void;
   setActiveTab: (tab: any) => void;
@@ -53,6 +55,7 @@ const EditorTab: React.FC<EditorTabProps> = ({
   handleMagicFormat, handleMediaUpload, handleAction, setIsScheduleModalOpen,
   isProcessing, sheetUrl, setSheetUrl, handleSyncSheet, isSyncingSheet,
   bulkFiles, handleBulkFilesUpload, bulkType, setBulkType, handleRunBulk,
+  enableRotation, setEnableRotation,
   sheetRows, setSheetRows, setActiveTab
 }) => {
   const [previewMode, setPreviewMode] = React.useState<PreviewMode>('MANUAL');
@@ -268,12 +271,12 @@ const EditorTab: React.FC<EditorTabProps> = ({
                           </div>
                        </div>
                        <div className="mt-4">
-                          <input 
-                            type="text" 
+                          <textarea 
                             value={m.description} 
                             onChange={(e) => updateMediaDescription(m.id, e.target.value)} 
-                            placeholder="Add Alt Text..." 
-                            className="w-full bg-slate-50 dark:bg-white/5 border-none rounded-2xl px-5 py-3.5 text-[11px] font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest placeholder-slate-300 dark:placeholder-slate-700" 
+                            placeholder="Legenda da imagem / Receita..." 
+                            rows={4}
+                            className="w-full bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-slate-800/40 rounded-2xl px-5 py-3.5 text-xs font-semibold text-slate-700 dark:text-slate-300 placeholder-slate-400 dark:placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 resize-y" 
                           />
                        </div>
                     </div>
@@ -460,6 +463,17 @@ const EditorTab: React.FC<EditorTabProps> = ({
                   <input type="file" multiple className="hidden" onChange={handleBulkFilesUpload} accept="image/*,video/*" />
                 </label>
               </div>
+            </div>
+
+            <div className="bg-slate-50/50 dark:bg-white/5 border border-slate-100 dark:border-slate-800/50 rounded-2xl p-5 flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider mb-1">Rotação em Matriz</h4>
+                <p className="text-[10px] font-bold text-slate-400">Distribui ciclicamente os posts a cada 10 páginas em vez de postar o mesmo post ao mesmo tempo.</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only peer" checked={enableRotation} onChange={e => setEnableRotation(e.target.checked)} />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
+              </label>
             </div>
 
             <button 

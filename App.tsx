@@ -48,6 +48,7 @@ const App: React.FC = () => {
     bulkFiles, handleBulkFilesUpload,
     isSyncingSheet, handleSyncSheet,
     bulkType, setBulkType, handleRunBulk,
+    enableRotation, setEnableRotation,
     manualData, setManualData, handleMagicFormat, handleMediaUpload, handleAction,
     postQueue, removeFromQueue, clearCompletedFromQueue,
     togglePageSelection, handleSelectGroup, handleCreateGroup, deletePageGroup,
@@ -124,6 +125,8 @@ const App: React.FC = () => {
                 setSheetRows={setSheetRows}
                 setActiveTab={setActiveTab}
                 deletePageGroup={deletePageGroup}
+                enableRotation={enableRotation}
+                setEnableRotation={setEnableRotation}
               />
             )}
 

@@ -18,6 +18,7 @@ const tabLabels: Record<Tab, string> = {
   [Tab.EDITOR_STEALTH]: 'Stealth Post Engine',
   [Tab.GATEWAYS]: 'Gateway Manager',
   [Tab.SEGURANCA]: 'Security Command Center',
+  [Tab.LEADS]: 'Leads Hub',
 };
 
 const Header: React.FC<HeaderProps> = ({ 
