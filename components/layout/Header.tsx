@@ -25,7 +25,7 @@ const Header: React.FC<HeaderProps> = ({
   activeTab, isProcessing, progress, onRefresh, isDarkMode, toggleDarkMode, onMenuClick 
 }) => {
   return (
-    <header className="h-20 bg-white/80 dark:bg-[#0d1117]/80 backdrop-blur-xl border-b border-slate-100 dark:border-slate-800/50 px-6 lg:px-10 flex items-center justify-between sticky top-0 z-40 transition-all duration-300">
+    <header className="h-16 lg:h-20 bg-white/80 dark:bg-[#0d1117]/80 backdrop-blur-xl border-b border-slate-100 dark:border-slate-800/50 px-4 lg:px-10 flex items-center justify-between sticky top-0 z-40 transition-all duration-300">
       
       {/* LEFT: TAB TITLE & MOBILE MENU */}
       <div className="flex items-center gap-6">

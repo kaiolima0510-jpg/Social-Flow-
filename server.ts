@@ -1,8 +1,8 @@
 
 import express from "express";
 
-import { fetchPendingComments, updateScheduledCommentStatus, getAutoReplyConfig, supabase } from "./services/supabaseService";
-import { postComment, sendPrivateReply } from "./services/facebookService";
+import { fetchPendingComments, updateScheduledCommentStatus, getAutoReplyConfig, supabase, fetchPostQueue, updatePostQueueStatus } from "./services/supabaseService";
+import { postComment, sendPrivateReply, postToFacebook } from "./services/facebookService";
 import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -90,6 +90,99 @@ async function processComments() {
     console.error("[Comment Robot] Error in background job:", err.message);
   } finally {
     setTimeout(processComments, COMMENT_CHECK_INTERVAL);
+  }
+}
+
+// ==========================================
+// BACKGROUND POST QUEUE PROCESSOR
+// ==========================================
+const POST_QUEUE_INTERVAL = 10000; // 10 seconds
+
+async function processPostQueue() {
+  try {
+    const queue = await fetchPostQueue();
+    const pendingItems = queue.filter((i: any) => i.status === 'pending');
+    
+    for (const item of pendingItems) {
+      console.log(`[PostQueue] Starting processing for item: ${item.label} (${item.id})`);
+      
+      // Update status to processing to prevent double processing
+      await updatePostQueueStatus(item.id, { status: 'processing' });
+      let currentProgress = item.progress_current || 0;
+      let logs = [...(item.logs || [])];
+      
+      const logMsg = (msg: string) => {
+        console.log(`[PostQueue] ${msg}`);
+        logs.push(`${new Date().toLocaleTimeString()} - ${msg}`);
+      };
+
+      try {
+        // Fetch media blobs from URLs
+        const mediaBlobs: { blob: Blob; description: string }[] = [];
+        if (item.media_urls && item.media_urls.length > 0) {
+          logMsg(`Downloading ${item.media_urls.length} media files...`);
+          for (let i = 0; i < item.media_urls.length; i++) {
+            const url = item.media_urls[i];
+            const res = await fetch(url);
+            const blob = await res.blob();
+            // Try to figure out description, here we just pass empty if we don't store it properly.
+            // But we can just pass empty string since it's an album item
+            mediaBlobs.push({ blob, description: "" });
+          }
+        }
+
+        let totalSuccess = 0;
+        let totalFailed = 0;
+
+        for (const page of item.pages) {
+          logMsg(`Deploying to ${page.name}...`);
+          // update progress
+          await updatePostQueueStatus(item.id, { logs });
+          
+          const res = await postToFacebook(
+            page.access_token,
+            page.fb_id,
+            item.caption,
+            mediaBlobs,
+            undefined, // scheduledTime handled differently or not supported here yet
+            item.type,
+            item.story_link,
+            2
+          );
+
+          if (res.success) {
+            logMsg(`[OK] Success on ${page.name}. ID: ${res.id}`);
+            totalSuccess++;
+            currentProgress++;
+            await updatePostQueueStatus(item.id, { progress_current: currentProgress, logs });
+          } else {
+            logMsg(`[FAIL] Error on ${page.name}: ${res.error}`);
+            totalFailed++;
+            await updatePostQueueStatus(item.id, { logs });
+          }
+          
+          // Anti-spam delay
+          await new Promise(r => setTimeout(r, 4000));
+        }
+
+        const finalStatus = totalFailed === item.pages.length ? 'error' : 'done';
+        logMsg(`Finished processing. Success: ${totalSuccess}, Failed: ${totalFailed}. Status -> ${finalStatus}`);
+        
+        await updatePostQueueStatus(item.id, { 
+          status: finalStatus, 
+          progress_current: currentProgress, 
+          logs 
+        });
+
+      } catch (err: any) {
+        logMsg(`[CRITICAL ERROR]: ${err.message}`);
+        await updatePostQueueStatus(item.id, { status: 'error', logs });
+      }
+    }
+  } catch (err: any) {
+    console.error("[PostQueue] Error in processing queue:", err.message);
+  } finally {
+    setTimeout(processPostQueue, POST_QUEUE_INTERVAL);
   }
 }
 
@@ -246,6 +339,8 @@ async function startServer() {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log("[Comment Robot] Starting orchestration...");
     processComments();
+    console.log("[PostQueue Robot] Starting queue processor...");
+    processPostQueue();
   });
 
   const shutdown = () => {

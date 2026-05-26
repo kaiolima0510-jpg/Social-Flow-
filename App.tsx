@@ -2,6 +2,7 @@
 import React from 'react';
 import { Tab } from './types';
 import { useSocialFlow } from './hooks/useSocialFlow';
+import { Activity, Zap, Users, Globe, Shield } from 'lucide-react';
 
 // Layout
 import Sidebar from './components/layout/Sidebar';
@@ -57,6 +58,10 @@ const App: React.FC = () => {
 
   } = useSocialFlow();
 
+  const activeQueueCount = postQueue.filter(
+    (i: any) => i.status === 'pending' || i.status === 'processing'
+  ).length;
+
   return (
     <div className={`flex h-screen ${isDarkMode ? 'bg-[#020617]' : 'bg-[#F8FAFC]'} transition-colors duration-300 overflow-hidden font-sans`}>
       
@@ -86,7 +91,7 @@ const App: React.FC = () => {
         />
 
         {/* CONTENT HUB */}
-        <div className="flex-1 overflow-y-auto p-4 lg:p-10 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-3 lg:p-10 pb-24 lg:pb-10 custom-scrollbar">
           <ErrorBoundary>
             {activeTab === Tab.DASHBOARD && (
               <DashboardTab 
@@ -201,6 +206,50 @@ const App: React.FC = () => {
         removeFromQueue={removeFromQueue}
         clearCompletedFromQueue={clearCompletedFromQueue}
       />
+
+      {/* ===== MOBILE BOTTOM NAVIGATION ===== */}
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-[60] bg-white/95 dark:bg-[#0f172a]/95 backdrop-blur-xl border-t border-slate-100 dark:border-slate-800/50 shadow-2xl shadow-black/5">
+        <div className="flex items-stretch h-16" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+          {([
+            { tab: Tab.DASHBOARD,      Icon: Activity, label: 'Hub' },
+            { tab: Tab.EDITOR_STEALTH, Icon: Zap,      label: 'Editor' },
+            { tab: Tab.LEADS,          Icon: Users,    label: 'Leads' },
+            { tab: Tab.GATEWAYS,       Icon: Globe,    label: 'Gateways' },
+            { tab: Tab.SEGURANCA,      Icon: Shield,   label: 'Segurança' },
+          ] as { tab: Tab; Icon: React.ElementType; label: string }[]).map(({ tab, Icon, label }) => {
+            const isActive = activeTab === tab;
+            const badge = tab === Tab.EDITOR_STEALTH ? activeQueueCount : 0;
+            return (
+              <button
+                key={tab}
+                onClick={() => { setActiveTab(tab); setIsSidebarOpen(false); }}
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 relative transition-all duration-200 active:scale-90 select-none ${
+                  isActive
+                    ? 'text-indigo-600 dark:text-indigo-400'
+                    : 'text-slate-400 dark:text-slate-600'
+                }`}
+              >
+                {isActive && (
+                  <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-indigo-600 rounded-b-full" />
+                )}
+                {badge > 0 && (
+                  <span className="absolute top-1.5 left-1/2 ml-2 min-w-[16px] h-4 flex items-center justify-center px-1 text-[8px] font-black bg-rose-500 text-white rounded-full leading-none">
+                    {badge}
+                  </span>
+                )}
+                <Icon
+                  size={20}
+                  strokeWidth={isActive ? 2.5 : 2}
+                  className={`transition-transform duration-200 ${isActive ? 'scale-110' : ''}`}
+                />
+                <span className={`text-[9px] font-black uppercase tracking-wider ${isActive ? 'opacity-100' : 'opacity-50'}`}>
+                  {label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 };

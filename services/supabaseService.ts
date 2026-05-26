@@ -530,3 +530,97 @@ export const fetchTotalLeadsCount = async (): Promise<number> => {
     return 0;
   }
 };
+
+// ==========================================
+// BACKGROUND QUEUE & MEDIA SYSTEM
+// ==========================================
+
+export const uploadMediaToStorage = async (file: File): Promise<string | null> => {
+  try {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
+    const filePath = `post_media/${fileName}`;
+
+    const { data, error } = await supabase.storage
+      .from('media')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+    if (error) {
+      console.error("Storage upload error:", error);
+      return null;
+    }
+
+    const { data: publicUrlData } = supabase.storage
+      .from('media')
+      .getPublicUrl(filePath);
+
+    return publicUrlData.publicUrl;
+  } catch (e) {
+    console.error("Crash on uploadMediaToStorage:", e);
+    return null;
+  }
+};
+
+export const savePostQueue = async (item: any) => {
+  const { data, error } = await supabase
+    .from('post_queue')
+    .insert([{
+      status: item.status,
+      label: item.label,
+      type: item.type,
+      caption: item.caption,
+      comments: item.comments,
+      auto_reply_text: item.autoReplyText,
+      story_link: item.storyLink,
+      is_scheduled: item.isScheduled,
+      scheduled_date: item.scheduledDate,
+      use_ai: item.useAI,
+      pages: item.pages,
+      media_urls: item.mediaUrls,
+      progress_current: item.progress.current,
+      progress_total: item.progress.total,
+      logs: item.logs
+    }])
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Error saving to post_queue:", error);
+    throw error;
+  }
+  return data;
+};
+
+export const fetchPostQueue = async () => {
+  const { data, error } = await supabase
+    .from('post_queue')
+    .select('*')
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error("Error fetching post_queue:", error);
+    return [];
+  }
+  return data || [];
+};
+
+export const updatePostQueueStatus = async (id: string, updates: any) => {
+  const { error } = await supabase
+    .from('post_queue')
+    .update(updates)
+    .eq('id', id);
+
+  if (error) {
+    console.error("Error updating post_queue:", error);
+  }
+};
+
+export const deletePostQueueItem = async (id: string) => {
+  const { error } = await supabase.from('post_queue').delete().eq('id', id);
+  if (error) console.error("Error deleting post_queue:", error);
+};
+
+export const clearCompletedPostQueue = async () => {
+  const { error } = await supabase.from('post_queue').delete().in('status', ['done', 'error']);
+  if (error) console.error("Error clearing post_queue:", error);
+};

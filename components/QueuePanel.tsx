@@ -54,7 +54,7 @@ const QueuePanel: React.FC<QueuePanelProps> = ({ postQueue, removeFromQueue, cle
 
   return (
     <div className={`
-      fixed bottom-8 right-8 z-[100] w-[400px] rounded-[2.5rem] shadow-[0_30px_100px_rgba(0,0,0,0.2)] dark:shadow-[0_30px_100px_rgba(0,0,0,0.5)] 
+      fixed bottom-20 lg:bottom-8 right-4 lg:right-8 left-4 lg:left-auto lg:w-[400px] z-[100] rounded-[2.5rem] shadow-[0_30px_100px_rgba(0,0,0,0.2)] dark:shadow-[0_30px_100px_rgba(0,0,0,0.5)] 
       overflow-hidden border border-white/20 dark:border-white/10 transition-all duration-700 animate-fade-left
     `}
     style={{ maxHeight: isOpen ? '650px' : '72px' }}>

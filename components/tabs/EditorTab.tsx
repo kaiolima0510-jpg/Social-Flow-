@@ -106,13 +106,13 @@ const EditorTab: React.FC<EditorTabProps> = ({
   const validationMsg = getValidationMessage();
 
   return (
-    <div className="max-w-[1600px] mx-auto grid grid-cols-12 gap-8 lg:gap-12 animate-fade-up px-6 lg:px-12 pb-24">
+    <div className="max-w-[1600px] mx-auto grid grid-cols-12 gap-6 lg:gap-12 animate-fade-up px-4 lg:px-12 pb-24">
       
       {/* LEFT COLUMN - EDITOR & BULK */}
       <div className="col-span-12 lg:col-span-7 space-y-10">
         
         {/* DESTINATION SELECTOR */}
-        <div className="group bg-white dark:bg-[#0f172a] p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800/50 shadow-sm hover:shadow-xl transition-all duration-500">
+        <div className="group bg-white dark:bg-[#0f172a] p-6 lg:p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800/50 shadow-sm hover:shadow-xl transition-all duration-500">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
             <div className="flex items-center gap-5">
               <div className="p-3.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-2xl">
@@ -172,7 +172,7 @@ const EditorTab: React.FC<EditorTabProps> = ({
         </div>
 
         {/* STEALTH POST ENGINE */}
-        <div className="bg-white dark:bg-[#0f172a] p-10 rounded-[3rem] border border-slate-100 dark:border-slate-800/50 shadow-2xl relative overflow-hidden">
+        <div className="bg-white dark:bg-[#0f172a] p-6 lg:p-10 rounded-[3rem] border border-slate-100 dark:border-slate-800/50 shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 blur-[100px] -mr-32 -mt-32"></div>
           
           <div className="relative z-10 space-y-12">
@@ -261,7 +261,7 @@ const EditorTab: React.FC<EditorTabProps> = ({
                <label className="text-[11px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-[0.2em] flex items-center gap-2.5">
                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div> Assets Visuais
                </label>
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {manualData.media.map((m: any) => (
                     <div key={m.id} className="relative group animate-fade-up">
                        <div className="aspect-[4/5] rounded-[2.5rem] border-2 border-slate-100 dark:border-slate-800/50 overflow-hidden relative shadow-lg">
@@ -398,7 +398,7 @@ const EditorTab: React.FC<EditorTabProps> = ({
                 <button 
                   onClick={() => handleAction(false)} 
                   disabled={!canPost} 
-                  className="w-full h-20 bg-indigo-600 text-white rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] flex items-center justify-center gap-4 shadow-2xl shadow-indigo-500/40 hover:bg-indigo-700 hover:-translate-y-1 active:scale-[0.98] transition-all duration-300 disabled:opacity-40 disabled:grayscale disabled:translate-y-0"
+                  className="w-full h-16 lg:h-20 bg-indigo-600 text-white rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] flex items-center justify-center gap-4 shadow-2xl shadow-indigo-500/40 hover:bg-indigo-700 hover:-translate-y-1 active:scale-[0.98] transition-all duration-300 disabled:opacity-40 disabled:grayscale disabled:translate-y-0"
                 >
                   {isProcessing ? <Loader2 size={24} className="animate-spin" /> : <><Zap size={22}/> Deploy Now</>}
                 </button>
@@ -413,7 +413,7 @@ const EditorTab: React.FC<EditorTabProps> = ({
               <button 
                 onClick={() => setIsScheduleModalOpen(true)} 
                 disabled={!canPost} 
-                className="w-full h-20 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] flex items-center justify-center gap-4 hover:shadow-2xl transition-all active:scale-[0.98] disabled:opacity-40"
+                className="w-full h-16 lg:h-20 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] flex items-center justify-center gap-4 hover:shadow-2xl transition-all active:scale-[0.98] disabled:opacity-40"
               >
                 <Calendar size={22}/> Schedule
               </button>
@@ -422,7 +422,7 @@ const EditorTab: React.FC<EditorTabProps> = ({
         </div>
 
         {/* BULK HUB */}
-        <div className="bg-white dark:bg-[#0f172a] p-10 rounded-[3rem] border border-slate-100 dark:border-slate-800/50 shadow-sm relative overflow-hidden">
+        <div className="bg-white dark:bg-[#0f172a] p-6 lg:p-10 rounded-[3rem] border border-slate-100 dark:border-slate-800/50 shadow-sm relative overflow-hidden">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
             <div className="flex items-center gap-5">
               <div className="p-3.5 bg-slate-100 dark:bg-white/5 text-slate-800 dark:text-white rounded-2xl">

@@ -25,7 +25,12 @@ import {
   fetchScheduledCommentsSummary, 
   updateScheduledCommentStatus,
   saveAutoReplyConfig,
-  scheduleComment
+  scheduleComment,
+  savePostQueue,
+  fetchPostQueue,
+  uploadMediaToStorage,
+  deletePostQueueItem,
+  clearCompletedPostQueue
 } from '../services/supabaseService';
 import { generateBatchVariations, formatTextWithAI, generateAlbumDescriptions } from '../services/geminiService';
 import { fetchGoogleSheetData, SpreadsheetRow } from '../services/spreadsheetService';
@@ -104,12 +109,39 @@ export const useSocialFlow = () => {
   const [bulkType, setBulkType] = useState<PostType>('SINGLE');
   const [enableRotation, setEnableRotation] = useState(false);
 
-  // ===== POST QUEUE =====
-  const [postQueue, setPostQueue] = useState<QueueItem[]>([]);
-  const queueRunningRef = useRef(false);
-  const postQueueRef = useRef<QueueItem[]>([]);
-  // keep ref in sync
-  useEffect(() => { postQueueRef.current = postQueue; }, [postQueue]);
+  // ===== POST QUEUE (Remote) =====
+  const [postQueue, setPostQueue] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchQueue = async () => {
+      try {
+        const remoteQueue = await fetchPostQueue();
+        const mappedQueue = remoteQueue.map((q: any) => ({
+          id: q.id,
+          status: q.status,
+          label: q.label,
+          type: q.type,
+          caption: q.caption,
+          comments: q.comments,
+          autoReplyText: q.auto_reply_text,
+          storyLink: q.story_link,
+          isScheduled: q.is_scheduled,
+          scheduledDate: q.scheduled_date,
+          useAI: q.use_ai,
+          pages: q.pages,
+          mediaUrls: q.media_urls,
+          progress: { current: q.progress_current || 0, total: q.progress_total || 0 },
+          logs: q.logs || [],
+          createdAt: new Date(q.created_at).toLocaleTimeString('pt-BR')
+        }));
+        setPostQueue(mappedQueue);
+      } catch (e) {}
+    };
+
+    fetchQueue();
+    const interval = setInterval(fetchQueue, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
 
   const [manualData, setManualData] = useState({
@@ -551,137 +583,8 @@ export const useSocialFlow = () => {
     } finally { setIsProcessing(false); }
   };
 
-  // ===== QUEUE PROCESSOR =====
-  const processQueueItem = async (item: QueueItem) => {
-    const log = (msg: string) => {
-      addSecurityLog(msg);
-      setPostQueue(prev => prev.map(i => i.id === item.id ? { ...i, logs: [...i.logs, msg] } : i));
-    };
-    const setItemProgress = (current: number) => {
-      setPostQueue(prev => prev.map(i => i.id === item.id ? { ...i, progress: { ...i.progress, current } } : i));
-    };
-
-    log(`ENGINE: Iniciando [${item.label}] em ${item.pages.length} páginas...`);
-
-    let variations: string[] = [];
-    let commentVariations: string[] = [];
-
-    if (item.useAI && item.type !== 'STORY') {
-      try {
-        log("IA: Gerando variações...");
-        const aiRes = await generateBatchVariations(item.caption, item.pages.length);
-        variations = aiRes.variations;
-        const firstCmt = item.comments?.[0]?.text;
-        if (firstCmt) {
-          const cmtAiRes = await generateBatchVariations(firstCmt, item.pages.length);
-          commentVariations = cmtAiRes.variations;
-        }
-      } catch (e) { /* continua sem variações */ }
-    }
-
-    try {
-      const historyId = await logPostHistory({
-        main_caption: item.caption,
-        first_comment: item.comments?.[0]?.text || "",
-        target_group: item.label,
-        post_type: item.type
-      });
-
-      for (let i = 0; i < item.pages.length; i++) {
-        if (i > 0 && i % 20 === 0) {
-          log("PAUSA: Macro-Delay ativado. Descansando por 3 a 5 minutos...");
-          await new Promise(r => setTimeout(r, (3 * 60 * 1000) + Math.random() * (2 * 60 * 1000)));
-        }
-
-        const page = item.pages[i];
-        setItemProgress(i + 1);
-
-        let finalCaption = (item.useAI && variations[i]) ? variations[i] : item.caption;
-        finalCaption = parseSpintax(finalCaption);
-        const schedDate = new Date(item.scheduledDate);
-        const sched = item.isScheduled ? Math.floor(schedDate.getTime() / 1000) : undefined;
-
-        const uniqueMedia = await Promise.all(item.media.map(async (m) => ({
-          blob: m.type === 'IMAGE'
-            ? await createUniqueImageHash(m.file, item.type === 'STORY')
-            : await createUniqueBinaryHash(m.file),
-          description: m.description
-        })));
-
-        const res = await executeWithBackoff(() => postToFacebook(
-          page.access_token || page.parentToken,
-          page.fb_id,
-          finalCaption,
-          uniqueMedia,
-          sched,
-          item.type,
-          item.type === 'STORY' ? item.storyLink : undefined
-        ), log);
-
-        await logPublication(historyId, page.fb_id, res.success ? 'success' : 'error', res.error || 'OK', res.id, item.useAI ? 100 : 0);
-
-        if (res.success) {
-          log(`OK: ${page.name} publicado.`);
-          
-          if (item.autoReplyText && item.autoReplyText.trim()) {
-            await saveAutoReplyConfig(page.fb_id, res.id!, item.autoReplyText.trim(), page.access_token || page.parentToken);
-            log(`MSG: Auto-Reply configurado para ${page.name}.`);
-          }
-
-          if (item.comments && item.comments.length > 0 && item.type !== 'STORY') {
-            for (let c = 0; c < item.comments.length; c++) {
-              const cmt = item.comments[c];
-              let cmtText = (c === 0 && item.useAI && commentVariations[i]) ? commentVariations[i] : cmt.text;
-              if (!cmtText.trim()) continue;
-              cmtText = parseSpintax(cmtText);
-
-              if (sched) {
-                await scheduleComment({ page_id: page.fb_id, access_token: page.access_token || page.parentToken, fb_post_id: res.id!, comment_text: cmtText, scheduled_time: schedDate.toISOString() });
-                log(`CMT: Agendado para ${page.name}.`);
-              } else if (cmt.delay > 0) {
-                const futureTime = new Date(Date.now() + cmt.delay * 60000);
-                await scheduleComment({ page_id: page.fb_id, access_token: page.access_token || page.parentToken, fb_post_id: res.id!, comment_text: cmtText, scheduled_time: futureTime.toISOString() });
-                log(`CMT: Robot agendado para daqui a ${cmt.delay}min em ${page.name}.`);
-              } else {
-                const propagationDelay = 2000 + Math.random() * 2000;
-                await new Promise(r => setTimeout(r, propagationDelay));
-                const cmtRes = await executeWithBackoff(() => postComment(page.access_token || page.parentToken, res.id!, cmtText), log);
-                if (cmtRes.id) log(`CMT: Comentário em ${page.name}.`);
-                else log(`FAIL CMT: ${page.name}: ${(cmtRes.error?.message || '').substring(0, 30)}`);
-              }
-            }
-          }
-        } else {
-          log(`FAIL: ${page.name} - ${(res.error || '').substring(0, 40)}`);
-        }
-        await new Promise(r => setTimeout(r, 8000 + Math.random() * 7000));
-      }
-
-      setPostQueue(prev => prev.map(i => i.id === item.id ? { ...i, status: 'done' } : i));
-      log(`✓ [${item.label}] concluído.`);
-      loadAccounts();
-    } catch (e: any) {
-      setPostQueue(prev => prev.map(i => i.id === item.id ? { ...i, status: 'error' } : i));
-      log(`ERR: ${e.message}`);
-    }
-  };
-
-  const runQueue = async () => {
-    if (queueRunningRef.current) return;
-    queueRunningRef.current = true;
-    while (true) {
-      const pending = postQueueRef.current.find(i => i.status === 'pending');
-      if (!pending) break;
-      setPostQueue(prev => prev.map(i => i.id === pending.id ? { ...i, status: 'processing' } : i));
-      // Update ref immediately so next iteration doesn't re-pick this item
-      postQueueRef.current = postQueueRef.current.map(i => i.id === pending.id ? { ...i, status: 'processing' } : i);
-      await processQueueItem(pending);
-    }
-    queueRunningRef.current = false;
-  };
-
-  // ===== ADD TO QUEUE (replaces handleAction) =====
-  const addToQueue = (isScheduled: boolean) => {
+  // ===== ADD TO QUEUE (Server-Side) =====
+  const addToQueue = async (isScheduled: boolean) => {
     if (manualData.media.length === 0) return alert('Escolha uma imagem ou vídeo.');
     const activePages = accounts
       .flatMap(acc => (acc.pages || []).map(p => ({ ...p, parentToken: acc.token })))
@@ -694,50 +597,65 @@ export const useSocialFlow = () => {
     );
     const label = `${selectedGroup?.name || 'Manual'} – ${manualData.type}`;
 
-    const newItem: QueueItem = {
-      id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      status: 'pending',
-      label,
-      type: manualData.type,
-      caption: manualData.caption,
-      comments: manualData.comments,
-      autoReplyText: manualData.autoReplyText,
-      storyLink: manualData.storyLink,
-      isScheduled,
-      scheduledDate: manualData.scheduledDate,
-      useAI,
-      pages: activePages,
-      media: manualData.media.map(m => ({ ...m })), // snapshot
-      progress: { current: 0, total: activePages.length },
-      logs: [],
-      createdAt: new Date().toLocaleTimeString('pt-BR'),
-    };
+    setIsProcessing(true);
+    try {
+      addSecurityLog(`UPLOADING: Fazendo upload de ${manualData.media.length} arquivos...`);
+      const mediaUrls = [];
+      for (const m of manualData.media) {
+        const url = await uploadMediaToStorage(m.file);
+        if (url) mediaUrls.push(url);
+      }
+      
+      if (mediaUrls.length !== manualData.media.length) {
+         addSecurityLog(`FAIL: Falha no upload de mídia. Tente novamente.`);
+         return;
+      }
 
-    setPostQueue(prev => [...prev, newItem]);
-    postQueueRef.current = [...postQueueRef.current, newItem];
+      const dbItem = {
+         status: 'pending',
+         label,
+         type: manualData.type,
+         caption: manualData.caption,
+         comments: manualData.comments,
+         autoReplyText: manualData.autoReplyText,
+         storyLink: manualData.storyLink,
+         isScheduled,
+         scheduledDate: manualData.scheduledDate,
+         useAI,
+         pages: activePages,
+         mediaUrls,
+         progress: { current: 0, total: activePages.length },
+         logs: [`QUEUE: [${label}] adicionado à fila (${activePages.length} páginas).`]
+      };
 
-    // Clear the form immediately so user can start next post
-    setManualData({
-      caption: '',
-      comments: [{ text: "", delay: 0 }],
-      autoReplyText: '',
-      scheduledDate: '',
-      storyLink: '',
-      type: manualData.type, // keep type
-      media: []
-    });
+      await savePostQueue(dbItem);
 
-    addSecurityLog(`QUEUE: [${label}] adicionado à fila (${activePages.length} páginas).`);
+      // Clear the form immediately so user can start next post
+      setManualData({
+        caption: '',
+        comments: [{ text: "", delay: 0 }],
+        autoReplyText: '',
+        scheduledDate: '',
+        storyLink: '',
+        type: manualData.type, // keep type
+        media: []
+      });
 
-    // Kick off queue processor in background (non-blocking)
-    setTimeout(() => runQueue(), 100);
+      addSecurityLog(`QUEUE: [${label}] adicionado à fila remota com sucesso.`);
+    } catch (e: any) {
+      addSecurityLog(`FAIL: Erro ao enfileirar: ${e.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  const removeFromQueue = (id: string) => {
+  const removeFromQueue = async (id: string) => {
+    await deletePostQueueItem(id);
     setPostQueue(prev => prev.filter(i => i.id !== id));
   };
 
-  const clearCompletedFromQueue = () => {
+  const clearCompletedFromQueue = async () => {
+    await clearCompletedPostQueue();
     setPostQueue(prev => prev.filter(i => i.status === 'pending' || i.status === 'processing'));
   };
 
