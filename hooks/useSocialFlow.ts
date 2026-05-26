@@ -89,7 +89,7 @@ export const useSocialFlow = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [tokenInput, setTokenInput] = useState("");
-  const [useAI, setUseAI] = useState(true);
+  const [useAI, setUseAI] = useState(false);
   const [realPageMetrics, setRealPageMetrics] = useState<any[]>([]);
   const [securityLogs, setSecurityLogs] = useState<string[]>(["SocialFlow Core Online", "Pronto para operar."]);
   const [robotLogs, setRobotLogs] = useState<any[]>([]);
