@@ -1,7 +1,7 @@
 
 import express from "express";
 
-import { fetchPendingComments, updateScheduledCommentStatus, getAutoReplyConfig, supabase, fetchPostQueue, updatePostQueueStatus } from "./services/supabaseService";
+import { fetchPendingComments, updateScheduledCommentStatus, getAutoReplyConfig, supabase, fetchPostQueue, updatePostQueueStatus, scheduleComment, saveAutoReplyConfig } from "./services/supabaseService";
 import { postComment, sendPrivateReply, postToFacebook } from "./services/facebookService";
 import http from "http";
 import path from "path";
@@ -152,6 +152,31 @@ async function processPostQueue() {
 
           if (res.success) {
             logMsg(`[OK] Success on ${page.name}. ID: ${res.id}`);
+            
+            // Scheduling comments if any
+            if (item.comments && item.comments.length > 0) {
+              logMsg(`Scheduling ${item.comments.length} comments for ${page.name}...`);
+              let delaySecs = 0;
+              for (const c of item.comments) {
+                if (!c.text) continue;
+                delaySecs += (c.delay || 0);
+                const schedTime = new Date(Date.now() + delaySecs * 1000).toISOString();
+                await scheduleComment({
+                  page_id: page.fb_id,
+                  access_token: page.access_token,
+                  fb_post_id: res.id,
+                  comment_text: c.text,
+                  scheduled_time: schedTime
+                });
+              }
+            }
+            
+            // Saving auto reply if any
+            if (item.auto_reply_text) {
+               logMsg(`Saving auto-reply for ${page.name}...`);
+               await saveAutoReplyConfig(page.fb_id, res.id, item.auto_reply_text, page.access_token);
+            }
+
             totalSuccess++;
             currentProgress++;
             await updatePostQueueStatus(item.id, { progress_current: currentProgress, logs });

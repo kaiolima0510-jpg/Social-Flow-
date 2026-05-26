@@ -298,13 +298,15 @@ export const postComment = async (token: string, postId: string, message: string
       }
     }
 
-    let url = `${FB_GRAPH_URL}/${postId}/comments?message=${encodeURIComponent(message)}&access_token=${token}`;
+    const url = `${FB_GRAPH_URL}/${postId}/comments`;
+    const fd = new FormData();
+    fd.append('access_token', token);
+    fd.append('message', message);
     if (extractedUrl) {
-      // attachment_share_url anexa explicitamente o card de prévia do link ao comentário
-      url += `&attachment_share_url=${encodeURIComponent(extractedUrl)}`;
+      fd.append('attachment_share_url', extractedUrl);
     }
 
-    const res = await fetch(url, { method: 'POST' });
+    const res = await fetch(url, { method: 'POST', body: fd });
     return await res.json();
   } catch (e: any) { 
     return { error: { message: e.message, code: e.code } }; 
