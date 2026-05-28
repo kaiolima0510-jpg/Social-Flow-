@@ -139,12 +139,18 @@ async function processPostQueue() {
           // update progress
           await updatePostQueueStatus(item.id, { logs });
           
+          let scheduledTimeUnix: number | undefined = undefined;
+          if (item.is_scheduled && item.scheduled_date) {
+            scheduledTimeUnix = Math.floor(new Date(item.scheduled_date).getTime() / 1000);
+            logMsg(`Post is scheduled for: ${new Date(item.scheduled_date).toLocaleString()} (Unix: ${scheduledTimeUnix})`);
+          }
+
           const res = await postToFacebook(
             page.access_token,
             page.fb_id,
             item.caption,
             mediaBlobs,
-            undefined, // scheduledTime handled differently or not supported here yet
+            scheduledTimeUnix,
             item.type,
             item.story_link,
             2
@@ -157,10 +163,14 @@ async function processPostQueue() {
             if (item.comments && item.comments.length > 0) {
               logMsg(`Scheduling ${item.comments.length} comments for ${page.name}...`);
               let delaySecs = 0;
+              const baseTimeMs = (item.is_scheduled && item.scheduled_date) 
+                ? new Date(item.scheduled_date).getTime() 
+                : Date.now();
+                
               for (const c of item.comments) {
                 if (!c.text) continue;
                 delaySecs += (c.delay || 0);
-                const schedTime = new Date(Date.now() + delaySecs * 1000).toISOString();
+                const schedTime = new Date(baseTimeMs + delaySecs * 1000).toISOString();
                 await scheduleComment({
                   page_id: page.fb_id,
                   access_token: page.access_token,
