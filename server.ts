@@ -141,8 +141,13 @@ async function processPostQueue() {
           
           let scheduledTimeUnix: number | undefined = undefined;
           if (item.is_scheduled && item.scheduled_date) {
-            scheduledTimeUnix = Math.floor(new Date(item.scheduled_date).getTime() / 1000);
-            logMsg(`Post is scheduled for: ${new Date(item.scheduled_date).toLocaleString()} (Unix: ${scheduledTimeUnix})`);
+            let dateStr = item.scheduled_date;
+            // Se a data vier do HTML datetime-local sem fuso horário, assumimos horário de Brasília (UTC-3)
+            if (!dateStr.includes('Z') && !dateStr.match(/[+-]\d{2}:\d{2}$/)) {
+              dateStr += "-03:00";
+            }
+            scheduledTimeUnix = Math.floor(new Date(dateStr).getTime() / 1000);
+            logMsg(`Post is scheduled for: ${new Date(dateStr).toLocaleString()} (Unix: ${scheduledTimeUnix})`);
           }
 
           const res = await postToFacebook(
@@ -163,9 +168,15 @@ async function processPostQueue() {
             if (item.comments && item.comments.length > 0) {
               logMsg(`Scheduling ${item.comments.length} comments for ${page.name}...`);
               let delaySecs = 0;
-              const baseTimeMs = (item.is_scheduled && item.scheduled_date) 
-                ? new Date(item.scheduled_date).getTime() 
-                : Date.now();
+              let baseTimeMs = Date.now();
+              
+              if (item.is_scheduled && item.scheduled_date) {
+                let dateStr = item.scheduled_date;
+                if (!dateStr.includes('Z') && !dateStr.match(/[+-]\d{2}:\d{2}$/)) {
+                  dateStr += "-03:00";
+                }
+                baseTimeMs = new Date(dateStr).getTime();
+              }
                 
               for (const c of item.comments) {
                 if (!c.text) continue;
