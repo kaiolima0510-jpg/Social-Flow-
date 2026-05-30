@@ -147,6 +147,10 @@ export const fetchPageMetrics = async (pageId: string, token: string) => {
   try {
     const res = await fetch(`${FB_GRAPH_URL}/${pageId}?fields=fan_count,talking_about_count,name,picture&access_token=${token}`);
     const data = await res.json();
+    if (data.error) {
+      console.error(`[fetchPageMetrics] Graph API Error for page ${pageId}:`, data.error.message || data.error);
+      return { error: true, errorDetails: data.error.message || JSON.stringify(data.error) };
+    }
     try {
       const insightsRes = await fetch(`${FB_GRAPH_URL}/${pageId}/insights?metric=page_impressions_unique,page_engaged_users&period=day&access_token=${token}`);
       const insightsData = await insightsRes.json();
@@ -166,7 +170,10 @@ export const fetchPageMetrics = async (pageId: string, token: string) => {
         picture: data.picture?.data?.url || ""
       };
     }
-  } catch (e) { return { error: true }; }
+  } catch (e: any) { 
+    console.error(`[fetchPageMetrics] Fetch exception for page ${pageId}:`, e.message);
+    return { error: true, errorDetails: e.message }; 
+  }
 };
 
 const sanitizeUrl = (url: string) => {

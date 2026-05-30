@@ -99,7 +99,27 @@ export const fetchAccountsFromCloud = async () => {
 };
 
 export const deleteAccountFromCloud = async (id: string) => {
-  await supabase.from('fb_accounts').delete().eq('id', id);
+  console.log(`[Supabase] Attempting to delete account/page with id: ${id}`);
+  
+  if (id === 'default') {
+    const { error } = await supabase.from('fb_pages').delete().is('account_id', null);
+    if (error) throw new Error(error.message);
+  } else {
+    // Tenta deletar se o id for o account_id em fb_pages
+    const { error: e1 } = await supabase.from('fb_pages').delete().eq('account_id', id);
+    if (e1) console.error("Error deleting by account_id:", e1);
+    
+    // Tenta deletar se o id for diretamente o id da pagina ou o fb_id em fb_pages
+    const { error: e2 } = await supabase.from('fb_pages').delete().eq('fb_id', id);
+    if (e2) console.error("Error deleting by fb_id:", e2);
+    
+    const { error: e3 } = await supabase.from('fb_pages').delete().eq('id', id);
+    if (e3) console.error("Error deleting by id:", e3);
+  }
+  
+  // Tenta deletar da tabela legada fb_accounts
+  const { error: e4 } = await supabase.from('fb_accounts').delete().eq('id', id);
+  if (e4) console.error("Error deleting from fb_accounts:", e4);
 };
 
 export const saveFullAccount = async (acc: { name: string, token: string, pages: any[] }) => {

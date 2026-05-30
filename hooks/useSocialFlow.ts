@@ -223,6 +223,7 @@ export const useSocialFlow = () => {
               safety_score: stats.successRate, 
               status: 'active',
               health: (m && !m.error) ? 'healthy' : 'warning',
+              errorDetails: m?.errorDetails,
               tokens: stats.tokens,
               lastPost: stats.lastPost
             },
@@ -662,8 +663,16 @@ export const useSocialFlow = () => {
 
     
   const deleteAccount = async (id: string) => {
-    await deleteAccountFromCloud(id);
+    setIsProcessing(true);
+    addSecurityLog("Removendo perfil da base de dados...");
+    try {
+      await deleteAccountFromCloud(id);
+      addSecurityLog("Perfil removido com sucesso.");
+    } catch (e: any) {
+      addSecurityLog(`Erro ao remover: ${e.message}`);
+    }
     await loadAccounts();
+    setIsProcessing(false);
   };
 
   const deletePageGroupById = async (id: string) => {

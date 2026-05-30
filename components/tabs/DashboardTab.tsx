@@ -134,11 +134,18 @@ const DashboardTab: React.FC<DashboardTabProps> = ({ realPageMetrics, stealthSta
                              </div>
                           </td>
                           <td className="px-8 py-6">
-                            <div className="flex items-center gap-2">
-                               <div className={`w-2 h-2 rounded-full ${p.health === 'healthy' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]'}`}></div>
-                               <span className={`text-[10px] font-black uppercase tracking-widest ${p.health === 'healthy' ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                 {p.health === 'healthy' ? 'Ativo' : 'Atenção'}
-                               </span>
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                 <div className={`w-2 h-2 rounded-full ${p.health === 'healthy' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]'}`}></div>
+                                 <span className={`text-[10px] font-black uppercase tracking-widest ${p.health === 'healthy' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                   {p.health === 'healthy' ? 'Ativo' : 'Atenção'}
+                                 </span>
+                              </div>
+                              {p.errorDetails && (
+                                <span className="text-[10px] text-amber-500/80 max-w-[200px] truncate" title={p.errorDetails}>
+                                  {p.errorDetails}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="px-8 py-6 font-bold text-slate-900 dark:text-slate-100">{p.fans?.toLocaleString() || 0}</td>
