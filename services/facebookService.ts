@@ -206,6 +206,23 @@ const sanitizeUrl = (url: string) => {
   try { return new URL(clean).toString(); } catch { return null; }
 };
 
+export const verifyPagePermissions = async (token: string): Promise<{ valid: boolean; missing: string[]; error?: string }> => {
+  try {
+    const res = await fetch(`${FB_GRAPH_URL}/me/permissions?access_token=${token}`);
+    const data = await res.json();
+    if (data.error) {
+      // Page tokens fail on permissions endpoint. This is normal and accepted.
+      return { valid: true, missing: [] };
+    }
+    const granted = (data.data || []).filter((p: any) => p.status === 'granted').map((p: any) => p.permission);
+    const required = ['pages_manage_posts', 'pages_read_engagement', 'pages_show_list'];
+    const missing = required.filter(p => !granted.includes(p));
+    return { valid: missing.length === 0, missing };
+  } catch (e: any) {
+    return { valid: true, missing: [], error: e.message };
+  }
+};
+
 export const postToFacebook = async (
   token: string,
   pageId: string,
@@ -213,88 +230,117 @@ export const postToFacebook = async (
   media: { blob: Blob; description: string }[],
   scheduledTime?: number,
   type: 'ALBUM' | 'SINGLE' | 'VIDEO' | 'STORY' = 'ALBUM',
-  storyLink?: string,
-  retries: number = 2
+  storyLink?: string
 ): Promise<{ success: boolean; id?: string; error?: string; code?: number }> => {
-  try {
-    let responseData: any;
-    let effectiveType = type;
-    if (type === 'SINGLE' && media[0]?.blob && media[0].blob.type.startsWith('video')) {
-      effectiveType = 'VIDEO';
-    }
-    if (type === 'VIDEO' && media[0]?.blob && !media[0].blob.type.startsWith('video')) {
-      effectiveType = media.length > 1 ? 'ALBUM' : 'SINGLE';
-    }
+  const retryDelays = [5000, 15000, 30000];
+  let lastError: any = null;
 
-    if (effectiveType === 'STORY') {
-      const isVideo = media[0].blob.type.startsWith('video');
-      const endpoint = isVideo ? 'video_stories' : 'photo_stories';
-      const fileKey = isVideo ? 'video' : 'photo';
-      const formData = new FormData();
-      formData.append(fileKey, media[0].blob, isVideo ? 'story.mp4' : 'story.jpg');
-      if (storyLink) {
-        const cleanLink = sanitizeUrl(storyLink);
-        if (cleanLink) formData.append('link', cleanLink);
+  // Pre-flight Graph API permission verification
+  try {
+    const permResult = await verifyPagePermissions(token);
+    if (!permResult.valid) {
+      console.warn(`[FB Token Warning] Missing required Facebook permissions: ${permResult.missing.join(', ')}`);
+    }
+  } catch (e) {}
+
+  for (let attempt = 0; attempt <= 3; attempt++) {
+    try {
+      let responseData: any;
+      let effectiveType = type;
+      if (type === 'SINGLE' && media[0]?.blob && media[0].blob.type.startsWith('video')) {
+        effectiveType = 'VIDEO';
       }
-      const res = await fetch(`${FB_GRAPH_URL}/${pageId}/${endpoint}?access_token=${token}`, { method: 'POST', body: formData, headers: BROWSER_HEADERS });
-      responseData = await res.json();
-    } else if (effectiveType === 'VIDEO') {
-      const fd = new FormData();
-      fd.append('access_token', token);
-      fd.append('source', media[0].blob, 'video.mp4');
-      fd.append('description', caption);
-      if (scheduledTime) {
-        fd.append('scheduled_publish_time', scheduledTime.toString());
-        fd.append('published', '0');
+      if (type === 'VIDEO' && media[0]?.blob && !media[0].blob.type.startsWith('video')) {
+        effectiveType = media.length > 1 ? 'ALBUM' : 'SINGLE';
       }
-      const res = await fetch(`${FB_GRAPH_URL}/${pageId}/videos`, { method: 'POST', body: fd, headers: BROWSER_HEADERS });
-      responseData = await res.json();
-    } else if (effectiveType === 'SINGLE') {
-      const fd = new FormData();
-      fd.append('access_token', token);
-      fd.append('source', media[0].blob, 'photo.jpg');
-      fd.append('caption', caption);
-      if (scheduledTime) {
-        fd.append('scheduled_publish_time', scheduledTime.toString());
-        fd.append('published', '0');
-      }
-      const res = await fetch(`${FB_GRAPH_URL}/${pageId}/photos`, { method: 'POST', body: fd, headers: BROWSER_HEADERS });
-      responseData = await res.json();
-    } else {
-      const mediaIds = [];
-      for (const m of media) {
+
+      if (effectiveType === 'STORY') {
+        const isVideo = media[0].blob.type.startsWith('video');
+        const endpoint = isVideo ? 'video_stories' : 'photo_stories';
+        const fileKey = isVideo ? 'video' : 'photo';
+        const formData = new FormData();
+        formData.append(fileKey, media[0].blob, isVideo ? 'story.mp4' : 'story.jpg');
+        if (storyLink) {
+          const cleanLink = sanitizeUrl(storyLink);
+          if (cleanLink) formData.append('link', cleanLink);
+        }
+        const res = await fetch(`${FB_GRAPH_URL}/${pageId}/${endpoint}?access_token=${token}`, { method: 'POST', body: formData, headers: BROWSER_HEADERS });
+        responseData = await res.json();
+      } else if (effectiveType === 'VIDEO') {
         const fd = new FormData();
         fd.append('access_token', token);
-        fd.append('source', m.blob, 'item.jpg');
-        fd.append('caption', m.description || "");
-        fd.append('published', '0');
+        fd.append('source', media[0].blob, 'video.mp4');
+        fd.append('description', caption);
+        if (scheduledTime) {
+          fd.append('scheduled_publish_time', scheduledTime.toString());
+          fd.append('published', '0');
+        }
+        const res = await fetch(`${FB_GRAPH_URL}/${pageId}/videos`, { method: 'POST', body: fd, headers: BROWSER_HEADERS });
+        responseData = await res.json();
+      } else if (effectiveType === 'SINGLE') {
+        const fd = new FormData();
+        fd.append('access_token', token);
+        fd.append('source', media[0].blob, 'photo.jpg');
+        fd.append('caption', caption);
+        if (scheduledTime) {
+          fd.append('scheduled_publish_time', scheduledTime.toString());
+          fd.append('published', '0');
+        }
         const res = await fetch(`${FB_GRAPH_URL}/${pageId}/photos`, { method: 'POST', body: fd, headers: BROWSER_HEADERS });
-        const d = await res.json();
-        if (d.id) mediaIds.push(d.id);
+        responseData = await res.json();
+      } else {
+        const mediaIds = [];
+        for (const m of media) {
+          const fd = new FormData();
+          fd.append('access_token', token);
+          fd.append('source', m.blob, 'item.jpg');
+          fd.append('caption', m.description || "");
+          fd.append('published', '0');
+          const res = await fetch(`${FB_GRAPH_URL}/${pageId}/photos`, { method: 'POST', body: fd, headers: BROWSER_HEADERS });
+          const d = await res.json();
+          if (d.id) mediaIds.push(d.id);
+        }
+        const feedFd = new FormData();
+        feedFd.append('access_token', token);
+        feedFd.append('message', caption);
+        feedFd.append('attached_media', JSON.stringify(mediaIds.map(id => ({ media_fbid: id }))));
+        if (scheduledTime) {
+          feedFd.append('scheduled_publish_time', scheduledTime.toString());
+          feedFd.append('published', '0');
+        }
+        const finalRes = await fetch(`${FB_GRAPH_URL}/${pageId}/feed`, { method: 'POST', body: feedFd, headers: BROWSER_HEADERS });
+        responseData = await finalRes.json();
       }
-      const feedFd = new FormData();
-      feedFd.append('access_token', token);
-      feedFd.append('message', caption);
-      feedFd.append('attached_media', JSON.stringify(mediaIds.map(id => ({ media_fbid: id }))));
-      if (scheduledTime) {
-        feedFd.append('scheduled_publish_time', scheduledTime.toString());
-        feedFd.append('published', '0');
-      }
-      const finalRes = await fetch(`${FB_GRAPH_URL}/${pageId}/feed`, { method: 'POST', body: feedFd, headers: BROWSER_HEADERS });
-      responseData = await finalRes.json();
-    }
 
-    if (responseData.error) {
-      if (retries > 0 && (responseData.error.code === 1 || responseData.error.code === 2)) {
-        await wait(3000);
-        return postToFacebook(token, pageId, caption, media, scheduledTime, type, storyLink, retries - 1);
+      if (responseData.error) {
+        lastError = responseData.error;
+        if (attempt < 3) {
+          const delay = retryDelays[attempt];
+          console.warn(`[FB Publisher] Facebook API returned error (Attempt ${attempt + 1}/4): ${lastError.message}. Waiting ${delay/1000}s before retry...`);
+          await wait(delay);
+          continue;
+        }
+        break;
       }
-      return { success: false, error: responseData.error.message, code: responseData.error.code };
+
+      return { success: true, id: responseData.id || responseData.post_id };
+    } catch (e: any) {
+      lastError = e;
+      if (attempt < 3) {
+        const delay = retryDelays[attempt];
+        console.warn(`[FB Publisher] Connection failure / Exception (Attempt ${attempt + 1}/4): ${lastError.message}. Waiting ${delay/1000}s before retry...`);
+        await wait(delay);
+        continue;
+      }
+      break;
     }
-    return { success: true, id: responseData.id || responseData.post_id };
-  } catch (e: any) {
-    return { success: false, error: e.message || JSON.stringify(e) };
   }
+
+  return { 
+    success: false, 
+    error: lastError?.message || JSON.stringify(lastError) || "Max auto-retries reached", 
+    code: lastError?.code 
+  };
 };
 
 export const postComment = async (token: string, postId: string, message: string) => {

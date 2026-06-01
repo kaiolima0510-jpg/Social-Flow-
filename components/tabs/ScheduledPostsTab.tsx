@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchPostQueue, deletePostQueueItem } from '../../services/supabaseService';
+import { fetchPostQueue, deletePostQueueItem, supabase } from '../../services/supabaseService';
 import { Tab } from '../../types';
 import { 
   Calendar, Trash2, Globe, AlertCircle, Clock, CheckCircle2, 
@@ -294,26 +294,91 @@ const ScheduledPostsTab: React.FC<{ activeTab: Tab; setActiveTab: (t: Tab) => vo
                       </div>
                     )}
 
-                    {/* Actions Panel */}
-                    <div className="flex items-center gap-2 mt-auto">
-                      {p.logs && p.logs.length > 0 && (
-                        <button
-                          onClick={() => toggleLogs(p.id)}
-                          className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors text-xs"
-                        >
-                          {expandedLogs[p.id] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                          Logs
-                        </button>
-                      )}
-                      
-                      <button
-                        onClick={() => handleDelete(p.id)}
-                        className="p-2.5 rounded-xl border border-rose-100 dark:border-rose-950/20 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/15 transition-colors shrink-0"
-                        title="Cancelar e Excluir Post"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
+                     {/* Actions Panel */}
+                     <div className="flex flex-col gap-2 mt-auto">
+                       {p.status === 'pending' && (
+                         <div className="flex items-center gap-2">
+                           <input 
+                             type="datetime-local" 
+                             defaultValue={p.scheduled_date ? p.scheduled_date.slice(0, 16) : ""}
+                             onChange={(e) => {
+                               p._new_date = e.target.value;
+                             }}
+                             className="flex-1 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 text-[10px] text-slate-800 dark:text-white"
+                           />
+                           <button
+                             onClick={async () => {
+                               if (!p._new_date) {
+                                 alert("Por favor, selecione uma data válida.");
+                                 return;
+                               }
+                               try {
+                                 const { error } = await supabase
+                                   .from('post_queue')
+                                   .update({ scheduled_date: p._new_date, status: 'pending' })
+                                   .eq('id', p.id);
+                                 if (error) throw error;
+                                 alert("Data e hora atualizadas com sucesso!");
+                                 loadPosts();
+                               } catch (e: any) {
+                                 alert("Erro ao reagendar: " + e.message);
+                               }
+                             }}
+                             className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-750 text-white font-black text-[10px] uppercase tracking-wider transition active:scale-95"
+                           >
+                             Reagendar
+                           </button>
+                         </div>
+                       )}
+                       
+                       <div className="flex items-center gap-2">
+                         {p.status === 'pending' && (
+                           <button
+                             onClick={async () => {
+                               if (!window.confirm("Deseja postar este conteúdo agora mesmo?")) return;
+                               try {
+                                 const { error } = await supabase
+                                   .from('post_queue')
+                                   .update({ 
+                                     status: 'pending', 
+                                     is_scheduled: false, 
+                                     scheduled_date: '',
+                                     logs: ['[Immediate Trigger] Publicação imediata iniciada via Painel do Usuário.'] 
+                                   })
+                                   .eq('id', p.id);
+                                 if (error) throw error;
+                                 alert("Publicação imediata ativada! O robô iniciou o processamento.");
+                                 loadPosts();
+                               } catch (e: any) {
+                                 alert("Erro ao iniciar postagem imediata: " + e.message);
+                               }
+                             }}
+                             className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition text-xs shadow-md shadow-indigo-600/10 active:scale-95"
+                           >
+                             <Play size={12} fill="white" />
+                             Postar Agora
+                           </button>
+                         )}
+                         
+                         {p.logs && p.logs.length > 0 && (
+                           <button
+                             onClick={() => toggleLogs(p.id)}
+                             className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-bold hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors text-xs"
+                           >
+                             {expandedLogs[p.id] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                             Logs
+                           </button>
+                         )}
+                         
+                         <button
+                           onClick={() => handleDelete(p.id)}
+                           className="p-2.5 rounded-xl border border-rose-100 dark:border-rose-950/20 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/15 transition-colors shrink-0"
+                           title="Cancelar e Excluir Post"
+                         >
+                           <Trash2 size={16} />
+                         </button>
+                       </div>
+                     </div>
                   </div>
                 </div>
 

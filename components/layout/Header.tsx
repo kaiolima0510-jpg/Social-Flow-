@@ -19,6 +19,7 @@ const tabLabels: Record<Tab, string> = {
   [Tab.GATEWAYS]: 'Gateway Manager',
   [Tab.SEGURANCA]: 'Security Command Center',
   [Tab.LEADS]: 'Leads Hub',
+  [Tab.SCHEDULED_POSTS]: 'Queue & Scheduler',
 };
 
 const Header: React.FC<HeaderProps> = ({ 

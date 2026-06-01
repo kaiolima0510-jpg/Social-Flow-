@@ -1,4 +1,5 @@
 
+import { extractMediaUrl } from "./services/mediaHelper";
 import express from "express";
 
 import { fetchPendingComments, updateScheduledCommentStatus, getAutoReplyConfig, supabase, fetchPostQueue, updatePostQueueStatus, scheduleComment, saveAutoReplyConfig } from "./services/supabaseService";
@@ -212,45 +213,50 @@ async function processPostQueue() {
           logMsg(`Downloading ${item.media_urls.length} media files...`);
           for (let i = 0; i < item.media_urls.length; i++) {
             const mediaItemRaw = item.media_urls[i];
-            let mediaUrl = mediaItemRaw;
+            const extractedUrl = extractMediaUrl(mediaItemRaw);
+            if (!extractedUrl) {
+              throw new Error(`Media URL extraída é nula/inválida para o item raw na posição ${i}: ${JSON.stringify(mediaItemRaw)}`);
+            }
+            
+            let mediaUrl = extractedUrl;
             let description = "";
 
-            let parsed: any = null;
             try {
+              let parsed: any = null;
               if (typeof mediaItemRaw === 'string') {
-                try {
-                  let cleanStr = mediaItemRaw.trim();
-                  // Unescape quotes if the string is wrapped in literal quotes
-                  if (cleanStr.startsWith('"') && cleanStr.endsWith('"')) {
-                    try {
-                      cleanStr = JSON.parse(cleanStr);
-                    } catch (e) {}
-                  }
-                  
-                  // Try to parse the JSON string
-                  if (cleanStr.startsWith('{') && cleanStr.endsWith('}')) {
-                    parsed = JSON.parse(cleanStr);
-                  }
-                } catch (e) {
-                  // Not a JSON string
+                const cleanStr = mediaItemRaw.trim();
+                if (cleanStr.startsWith('{') && cleanStr.endsWith('}')) {
+                  parsed = JSON.parse(cleanStr);
                 }
               } else if (typeof mediaItemRaw === 'object' && mediaItemRaw !== null) {
                 parsed = mediaItemRaw;
               }
-
-              if (parsed && typeof parsed === 'object' && parsed.url) {
-                mediaUrl = parsed.url;
-                description = parsed.description || "";
+              if (parsed && parsed.description) {
+                description = parsed.description;
               }
-            } catch (e) {
-              // Fallback to plain URL string
+            } catch (e) {}
+
+            logMsg(`Validando link da mídia via HEAD request: ${mediaUrl}`);
+            try {
+              const checkHead = await fetch(mediaUrl, { method: "HEAD" });
+              if (!checkHead.ok) {
+                logMsg(`[Warning] Servidor da mídia retornou status ${checkHead.status} para HEAD. Tentando download direto...`);
+              } else {
+                const contentType = checkHead.headers.get("content-type") || "";
+                const contentLength = checkHead.headers.get("content-length") || "Desconhecido";
+                logMsg(`Link validado com sucesso! Mimetype: ${contentType}, Size: ${contentLength} bytes`);
+              }
+            } catch (headErr: any) {
+              logMsg(`[Aviso Pré-flight] Falha ao efetuar HEAD request (${headErr.message}). Prosseguindo com download direto...`);
             }
 
             console.log("[Stealth Debug] mediaItemRaw:", JSON.stringify(mediaItemRaw));
-            console.log("[Stealth Debug] parsed:", JSON.stringify(parsed));
             console.log("[Stealth Debug] mediaUrl:", mediaUrl);
 
             const res = await fetch(mediaUrl);
+            if (!res.ok) {
+              throw new Error(`Falha no download da mídia (Status HTTP ${res.status}) para URL: ${mediaUrl}`);
+            }
             const blob = await res.blob();
             mediaBlobs.push({ blob, description });
           }
@@ -312,8 +318,7 @@ async function processPostQueue() {
              mediaBlobs,
              scheduledTimeUnix,
              item.type,
-             item.story_link,
-             2
+             item.story_link
            );
  
            if (res.success) {
@@ -393,7 +398,15 @@ async function processPostQueue() {
         });
 
       } catch (err: any) {
-        logMsg(`[CRITICAL ERROR]: ${err.message}`);
+        const errorStack = err.stack || "No callstack available";
+        const stackLines = errorStack.split('\n');
+        const locationLine = stackLines.length > 1 ? stackLines[1].trim() : "Unknown file/line";
+        
+        logMsg(`[CRITICAL ERROR] Causa: ${err.message}`);
+        logMsg(`[CRITICAL ERROR] Arquivo/Linha: ${locationLine}`);
+        logMsg(`[CRITICAL ERROR] Stack completa:`);
+        errorStack.split('\n').forEach((line: string) => logMsg(`  ${line}`));
+        
         await updatePostQueueStatus(item.id, { status: 'error', logs });
       }
     }
@@ -558,8 +571,32 @@ async function startServer() {
     }
   });
 
-  server.listen(PORT, () => {
+  server.listen(PORT, async () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    
+    // Recovery system: Restore any stuck 'processing' items back to 'pending' on startup
+    try {
+      console.log("[PostQueue Recovery] Checking for stuck processing queue items...");
+      const { data: recovered, error: recError } = await supabase
+        .from('post_queue')
+        .update({ 
+          status: 'pending', 
+          logs: ['System reboot/crash recovery initialized. Resetted item to pending.'] 
+        })
+        .eq('status', 'processing')
+        .select();
+
+      if (recError) {
+        console.error("[PostQueue Recovery] Supabase recovery query returned error:", recError.message);
+      } else if (recovered && recovered.length > 0) {
+        console.log(`[PostQueue Recovery] Successfully recovered ${recovered.length} stuck post(s) to pending!`);
+      } else {
+        console.log("[PostQueue Recovery] No stuck items found. All clear!");
+      }
+    } catch (recErr: any) {
+      console.error("[PostQueue Recovery] Failed to execute recovery routine:", recErr.message);
+    }
+
     console.log("[Comment Robot] Starting orchestration...");
     processComments();
     console.log("[PostQueue Robot] Starting queue processor...");
