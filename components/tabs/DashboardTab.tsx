@@ -1,14 +1,15 @@
 
-import React from 'react';
-import { Users, BarChart3, Heart, Zap, ShieldCheck, TrendingUp, Info, Layout, ArrowUpRight, MousePointer2, Globe } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { Users, BarChart3, Heart, Zap, ShieldCheck, TrendingUp, Info, Layout, ArrowUpRight, MousePointer2, Globe, AlertTriangle } from 'lucide-react';
 
 interface DashboardTabProps {
   realPageMetrics: any[];
   stealthStats: { totalTokens: number; integrity: number };
   isProcessing: boolean;
+  robotLogs: any[];
 }
 
-const DashboardTab: React.FC<DashboardTabProps> = ({ realPageMetrics, stealthStats, isProcessing }) => {
+const DashboardTab: React.FC<DashboardTabProps> = ({ realPageMetrics, stealthStats, isProcessing, robotLogs }) => {
   const isLoading = isProcessing;
   const totalFans = realPageMetrics.reduce((acc, p) => acc + (p.fans || 0), 0);
   const totalReach = realPageMetrics.reduce((acc, p) => acc + (p.reach || 0), 0);
@@ -54,8 +55,82 @@ const DashboardTab: React.FC<DashboardTabProps> = ({ realPageMetrics, stealthSta
     );
   }
 
+  // Filter for active blocks/restrictions in scheduled comments
+  const activeBlocks = useMemo(() => {
+    if (!robotLogs) return [];
+    
+    // Find all scheduled comments with spam/rate-limit error messages
+    const spamComments = robotLogs.filter(c => 
+      c.status === 'pending' && 
+      c.error_message && 
+      (c.error_message.toLowerCase().includes('frequência') || 
+       c.error_message.toLowerCase().includes('spam') || 
+       c.error_message.toLowerCase().includes('limit') || 
+       c.error_message.toLowerCase().includes('recurso no momento') || 
+       c.error_message.toLowerCase().includes('block'))
+    );
+
+    // Group by page_id to avoid repeating the same page multiple times
+    const uniquePages = new Set(spamComments.map(c => c.page_id));
+    return Array.from(uniquePages).map(pageId => {
+      const pageInfo = realPageMetrics.find(p => p.fb_id === pageId);
+      const lastError = spamComments.find(c => c.page_id === pageId)?.error_message || "";
+      const lastPostId = spamComments.find(c => c.page_id === pageId)?.fb_post_id || "";
+      return {
+        pageId,
+        name: pageInfo?.name || `Página (${pageId})`,
+        error: lastError,
+        postId: lastPostId
+      };
+    });
+  }, [robotLogs, realPageMetrics]);
+
   return (
     <div className="max-w-7xl mx-auto space-y-8 animate-fade-up px-6 lg:px-8 pb-10">
+      
+      {/* STEALTH COMMENT RESTRICTION ALERT BANNER */}
+      {activeBlocks.length > 0 && (
+        <div className="relative group p-6 rounded-[2rem] bg-rose-50/75 dark:bg-rose-500/10 border-2 border-rose-100 dark:border-rose-950/20 shadow-xl shadow-rose-500/5 backdrop-blur-xl animate-bounce-short overflow-hidden transition-all duration-300">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/5 blur-[80px] -mr-32 -mt-32"></div>
+          
+          <div className="relative z-10 flex flex-col md:flex-row gap-5 items-start">
+            <div className="p-4 bg-rose-600 text-white rounded-2xl shadow-lg shadow-rose-500/30 animate-pulse">
+              <AlertTriangle size={24} strokeWidth={2.5}/>
+            </div>
+            
+            <div className="flex-1 space-y-3">
+              <div>
+                <h3 className="text-lg font-black text-rose-900 dark:text-rose-400 tracking-tight leading-none mb-1.5 uppercase flex items-center gap-2">
+                   Restrição de Comentários Detectada!
+                </h3>
+                <p className="text-xs font-bold text-rose-600/80 dark:text-rose-400/50 uppercase tracking-widest leading-none">
+                  Filtro Anti-Spam do Facebook Ativado
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300 leading-relaxed">
+                  As seguintes páginas foram temporariamente restritas pelo Facebook devido à frequência de comentários com links. O SocialFlow **reagendou automaticamente** os comentários afetados para evitar suspensão definitiva das contas.
+                </p>
+                
+                <div className="divide-y divide-rose-100 dark:divide-rose-950/20 max-h-40 overflow-y-auto custom-scrollbar bg-white/40 dark:bg-black/25 rounded-2xl p-4 border border-rose-100/50 dark:border-rose-950/10 font-sans space-y-2">
+                  {activeBlocks.map((block, idx) => (
+                    <div key={idx} className="pt-2 first:pt-0 text-xs">
+                      <p className="font-black text-rose-800 dark:text-rose-400 mb-1 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                        {block.name}
+                      </p>
+                      <p className="font-mono text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
+                        Causa: {block.error}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* GLOBAL METRICS GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

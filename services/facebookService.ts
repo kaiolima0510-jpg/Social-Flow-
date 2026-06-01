@@ -3,6 +3,13 @@ import { FacebookPage } from '../types';
 
 const FB_GRAPH_URL = 'https://graph.facebook.com/v18.0';
 
+// Headers que simulam o app móvel do Facebook para evitar detecção bot
+const BROWSER_HEADERS = {
+  'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Accept': 'application/json, text/plain, */*',
+  'sec-fetch-site': 'same-origin',
+  'sec-fetch-mode': 'cors',
+};
 
 const wait = (ms: number) => new Promise(res => setTimeout(res, ms));
 
@@ -58,9 +65,25 @@ export const createUniqueImageHash = async (file: File, force916: boolean = fals
 export const createUniqueBinaryHash = async (file: File): Promise<Blob> => {
   const buffer = await file.arrayBuffer();
   const view = new Uint8Array(buffer);
-  const newBuffer = new Uint8Array(view.length + 1);
+  
+  // Cria buffer com espaço extra para bytes de "metadado" aleatório
+  const extraBytes = 8 + Math.floor(Math.random() * 8); // 8–16 bytes extras
+  const newBuffer = new Uint8Array(view.length + extraBytes);
   newBuffer.set(view);
-  newBuffer[view.length] = Math.floor(Math.random() * 256);
+  
+  // Preenche os bytes extras com dados aleatórios (simula encoder diferente)
+  for (let i = 0; i < extraBytes; i++) {
+    newBuffer[view.length + i] = Math.floor(Math.random() * 256);
+  }
+  
+  // Também modifica 2 bytes em posições aleatórias no meio do arquivo
+  // (fora dos primeiros 1KB que contêm o header do container)
+  if (view.length > 2048) {
+    const mid = 1024 + Math.floor(Math.random() * (view.length / 2));
+    newBuffer[mid] ^= 0x01; // XOR bit flip — altera sem corromper
+    newBuffer[mid + 1] ^= 0x01;
+  }
+  
   return new Blob([newBuffer], { type: file.type });
 };
 
@@ -213,7 +236,7 @@ export const postToFacebook = async (
         const cleanLink = sanitizeUrl(storyLink);
         if (cleanLink) formData.append('link', cleanLink);
       }
-      const res = await fetch(`${FB_GRAPH_URL}/${pageId}/${endpoint}?access_token=${token}`, { method: 'POST', body: formData });
+      const res = await fetch(`${FB_GRAPH_URL}/${pageId}/${endpoint}?access_token=${token}`, { method: 'POST', body: formData, headers: BROWSER_HEADERS });
       responseData = await res.json();
     } else if (effectiveType === 'VIDEO') {
       const fd = new FormData();
@@ -224,7 +247,7 @@ export const postToFacebook = async (
         fd.append('scheduled_publish_time', scheduledTime.toString());
         fd.append('published', '0');
       }
-      const res = await fetch(`${FB_GRAPH_URL}/${pageId}/videos`, { method: 'POST', body: fd });
+      const res = await fetch(`${FB_GRAPH_URL}/${pageId}/videos`, { method: 'POST', body: fd, headers: BROWSER_HEADERS });
       responseData = await res.json();
     } else if (effectiveType === 'SINGLE') {
       const fd = new FormData();
@@ -235,7 +258,7 @@ export const postToFacebook = async (
         fd.append('scheduled_publish_time', scheduledTime.toString());
         fd.append('published', '0');
       }
-      const res = await fetch(`${FB_GRAPH_URL}/${pageId}/photos`, { method: 'POST', body: fd });
+      const res = await fetch(`${FB_GRAPH_URL}/${pageId}/photos`, { method: 'POST', body: fd, headers: BROWSER_HEADERS });
       responseData = await res.json();
     } else {
       const mediaIds = [];
@@ -245,7 +268,7 @@ export const postToFacebook = async (
         fd.append('source', m.blob, 'item.jpg');
         fd.append('caption', m.description || "");
         fd.append('published', '0');
-        const res = await fetch(`${FB_GRAPH_URL}/${pageId}/photos`, { method: 'POST', body: fd });
+        const res = await fetch(`${FB_GRAPH_URL}/${pageId}/photos`, { method: 'POST', body: fd, headers: BROWSER_HEADERS });
         const d = await res.json();
         if (d.id) mediaIds.push(d.id);
       }
@@ -257,7 +280,7 @@ export const postToFacebook = async (
         feedFd.append('scheduled_publish_time', scheduledTime.toString());
         feedFd.append('published', '0');
       }
-      const finalRes = await fetch(`${FB_GRAPH_URL}/${pageId}/feed`, { method: 'POST', body: feedFd });
+      const finalRes = await fetch(`${FB_GRAPH_URL}/${pageId}/feed`, { method: 'POST', body: feedFd, headers: BROWSER_HEADERS });
       responseData = await finalRes.json();
     }
 
@@ -270,7 +293,7 @@ export const postToFacebook = async (
     }
     return { success: true, id: responseData.id || responseData.post_id };
   } catch (e: any) {
-    return { success: false, error: e.message, code: e.code };
+    return { success: false, error: e.message || JSON.stringify(e) };
   }
 };
 
@@ -283,7 +306,7 @@ export const postComment = async (token: string, postId: string, message: string
     
     if (extractedUrl) {
       // Remove pontuações finais capturadas incorretamente
-      extractedUrl = extractedUrl.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]+$/, "");
+      extractedUrl = extractedUrl.replace(/[.,\/#!$%\^\&\*;:{}=\-_`~()]+$/, "");
       try {
         new URL(extractedUrl); // Validação de segurança
       } catch (e) {
@@ -291,27 +314,37 @@ export const postComment = async (token: string, postId: string, message: string
       }
     }
 
-    // Se houver uma URL, fazemos o scrape prévio no Facebook
-    // para garantir que os metadados (título, descrição, imagem) estejam cacheados
+    // Scrape COMPLETAMENTE não-bloqueante — se falhar por rate limit ou qualquer motivo,
+    // o comentário ainda é postado normalmente. O link preview funciona mesmo sem o scrape.
     if (extractedUrl) {
       try {
-        console.log(`[Facebook API] Forçando scrape da URL: ${extractedUrl}`);
+        console.log(`[Facebook API] Tentando scrape da URL: ${extractedUrl}`);
         const scrapeUrl = `${FB_GRAPH_URL}/?id=${encodeURIComponent(extractedUrl)}&scrape=true&access_token=${token}`;
-        const scrapeRes = await fetch(scrapeUrl, { method: 'POST' });
-        const scrapeData = await scrapeRes.json();
-        console.log(`[Facebook API] Scrape finalizado:`, JSON.stringify(scrapeData));
+        // Timeout de 5s para não travar o fluxo principal
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const scrapeRes = await fetch(scrapeUrl, { method: 'POST', signal: controller.signal }).catch(() => null);
+        clearTimeout(timeout);
+        if (scrapeRes) {
+          const scrapeData = await scrapeRes.json().catch(() => ({}));
+          if (scrapeData?.error) {
+            console.warn(`[Facebook API] Scrape retornou erro (code ${scrapeData.error.code}) — ignorando e postando comentário mesmo assim.`);
+          } else {
+            console.log(`[Facebook API] Scrape OK.`);
+          }
+        }
       } catch (scrapeErr: any) {
-        console.warn("[Facebook API] Falha no scrape prévio (ignorando):", scrapeErr.message);
+        console.warn("[Facebook API] Scrape falhou (ignorando):", scrapeErr.message);
       }
     }
+
+    // Delay leve anti-spam antes de postar o comentário (1–3s)
+    await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
 
     const url = `${FB_GRAPH_URL}/${postId}/comments`;
     const fd = new FormData();
     fd.append('access_token', token);
     fd.append('message', message);
-    if (extractedUrl) {
-      fd.append('attachment_share_url', extractedUrl);
-    }
 
     const res = await fetch(url, { method: 'POST', body: fd });
     return await res.json();

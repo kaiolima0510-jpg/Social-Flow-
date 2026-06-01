@@ -361,6 +361,7 @@ export const updateScheduledCommentStatus = async (id: string, status: 'complete
   };
   
   if (attempts !== undefined) updateData.attempts = attempts;
+  if (error_log !== undefined) updateData.error_message = error_log;
 
   // Se estamos tentando travar como 'processing', fazemos uma checagem atômica
   if (status === 'processing') {

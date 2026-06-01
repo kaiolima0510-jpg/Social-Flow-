@@ -7,6 +7,7 @@ import { Activity, Zap, Users, Globe, Shield } from 'lucide-react';
 // Layout
 import Sidebar from './components/layout/Sidebar';
 import Header from './components/layout/Header';
+import ScheduledPostsTab from './components/tabs/ScheduledPostsTab';
 
 // Tabs
 import DashboardTab from './components/tabs/DashboardTab';
@@ -98,6 +99,7 @@ const App: React.FC = () => {
                 realPageMetrics={realPageMetrics} 
                 stealthStats={stealthStats} 
                 isProcessing={isProcessing}
+                robotLogs={robotLogs}
               />
             )}
 
@@ -159,6 +161,10 @@ const App: React.FC = () => {
                 isDarkMode={isDarkMode}
                 addSecurityLog={addSecurityLog}
               />
+            )}
+
+            {activeTab === Tab.SCHEDULED_POSTS && (
+              <ScheduledPostsTab activeTab={activeTab} setActiveTab={setActiveTab} />
             )}
 
             {activeTab === Tab.SEGURANCA && (

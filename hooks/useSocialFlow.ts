@@ -113,34 +113,53 @@ export const useSocialFlow = () => {
   const [postQueue, setPostQueue] = useState<any[]>([]);
 
   useEffect(() => {
-    const fetchQueue = async () => {
+    let timerId: NodeJS.Timeout;
+
+    const poll = async () => {
       try {
         const remoteQueue = await fetchPostQueue();
-        const mappedQueue = remoteQueue.map((q: any) => ({
-          id: q.id,
-          status: q.status,
-          label: q.label,
-          type: q.type,
-          caption: q.caption,
-          comments: q.comments,
-          autoReplyText: q.auto_reply_text,
-          storyLink: q.story_link,
-          isScheduled: q.is_scheduled,
-          scheduledDate: q.scheduled_date,
-          useAI: q.use_ai,
-          pages: q.pages,
-          mediaUrls: q.media_urls,
-          progress: { current: q.progress_current || 0, total: q.progress_total || 0 },
-          logs: q.logs || [],
-          createdAt: new Date(q.created_at).toLocaleTimeString('pt-BR')
-        }));
+        const mappedQueue = remoteQueue.map((q: any) => {
+          const plainMediaUrls = (q.media_urls || []).map((m: string) => {
+            try {
+              const trimmed = m.trim();
+              if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+                return JSON.parse(trimmed).url;
+              }
+            } catch (e) {}
+            return m;
+          });
+          
+          return {
+            id: q.id,
+            status: q.status,
+            label: q.label,
+            type: q.type,
+            caption: q.caption,
+            comments: q.comments,
+            autoReplyText: q.auto_reply_text,
+            storyLink: q.story_link,
+            isScheduled: q.is_scheduled,
+            scheduledDate: q.scheduled_date,
+            useAI: q.use_ai,
+            pages: q.pages,
+            mediaUrls: plainMediaUrls,
+            progress: { current: q.progress_current || 0, total: q.progress_total || 0 },
+            logs: q.logs || [],
+            createdAt: new Date(q.created_at).toLocaleTimeString('pt-BR')
+          };
+        });
         setPostQueue(mappedQueue);
-      } catch (e) {}
+
+        // Dynamic interval: 5 seconds if there are active tasks, otherwise slow down to 30 seconds when idle
+        const hasActive = remoteQueue.some((q: any) => q.status === 'pending' || q.status === 'processing');
+        timerId = setTimeout(poll, hasActive ? 5000 : 30000);
+      } catch (e) {
+        timerId = setTimeout(poll, 30000); // Fallback to slow poll on error
+      }
     };
 
-    fetchQueue();
-    const interval = setInterval(fetchQueue, 5000);
-    return () => clearInterval(interval);
+    poll();
+    return () => clearTimeout(timerId);
   }, []);
 
 
@@ -604,7 +623,12 @@ export const useSocialFlow = () => {
       const mediaUrls = [];
       for (const m of manualData.media) {
         const url = await uploadMediaToStorage(m.file);
-        if (url) mediaUrls.push(url);
+        if (url) {
+          mediaUrls.push(JSON.stringify({
+            url: url,
+            description: m.description || ""
+          }));
+        }
       }
       
       if (mediaUrls.length !== manualData.media.length) {
@@ -668,9 +692,19 @@ export const useSocialFlow = () => {
     try {
       await deleteAccountFromCloud(id);
       addSecurityLog("Perfil removido com sucesso.");
+      // Optimistically remove from local accounts state
+      setAccounts(prev => prev.filter(acc => acc.id !== id));
+      // Remove any selected page IDs belonging to the deleted account
+      setSelectedPageIds(prev => {
+        const newSet = new Set(prev);
+        const removedPages = accounts.find(acc => acc.id === id)?.pages?.map(p => p.fb_id) || [];
+        removedPages.forEach(pid => newSet.delete(pid));
+        return newSet;
+      });
     } catch (e: any) {
       addSecurityLog(`Erro ao remover: ${e.message}`);
     }
+    // Refresh from backend for consistency
     await loadAccounts();
     setIsProcessing(false);
   };

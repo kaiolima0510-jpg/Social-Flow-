@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Zap, Activity, Globe, Shield, ShieldCheck, Users, X, Menu, Terminal } from 'lucide-react';
+import { Zap, Activity, Globe, Shield, ShieldCheck, Users, X, Menu, Terminal, Calendar } from 'lucide-react';
 import { Tab } from '../../types';
 
 interface SidebarProps {
@@ -31,7 +31,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { tab: Tab.EDITOR_STEALTH, icon: <Zap size={18}/>,      label: 'Editor Stealth', badge: activeQueueCount },
     { tab: Tab.LEADS,          icon: <Users size={18}/>,    label: 'Leads' },
     { tab: Tab.GATEWAYS,       icon: <Globe size={18}/>,    label: 'Gateways' },
-    { tab: Tab.SEGURANCA,      icon: <Shield size={18}/>,   label: 'Segurança' },
+    { tab: Tab.SCHEDULED_POSTS, icon: <Zap size={18}/>, label: 'Posts Agendados', badge: activeQueueCount },
   ];
 
   return (
