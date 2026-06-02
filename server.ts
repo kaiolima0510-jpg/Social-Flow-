@@ -172,7 +172,8 @@ async function processPostQueue() {
     
     if (pendingItems.length === 0) return;
 
-    // Check Blackout Window (23h - 5h BRT / UTC-3) - Posts are allowed from 5am to 11pm
+    // Check Blackout Window (23h - 5h BRT / UTC-3) - Disabled per user request to allow 24/7 posting
+    /*
     const brTime = new Date(new Date().getTime() - 3 * 60 * 60 * 1000);
     const brHour = brTime.getUTCHours();
     if (brHour >= 23 || brHour < 5) {
@@ -180,6 +181,7 @@ async function processPostQueue() {
       setTimeout(processPostQueue, POST_QUEUE_INTERVAL);
       return;
     }
+    */
 
     for (const item of pendingItems) {
       console.log(`[PostQueue] Starting processing for item: ${item.label} (${item.id})`);
@@ -208,7 +210,7 @@ async function processPostQueue() {
 
       try {
         // Fetch media blobs from URLs
-        const mediaBlobs: { blob: Blob; description: string }[] = [];
+        const mediaBlobs: { blob: Blob; url?: string; description: string }[] = [];
         if (item.media_urls && item.media_urls.length > 0) {
           logMsg(`Downloading ${item.media_urls.length} media files...`);
           for (let i = 0; i < item.media_urls.length; i++) {
@@ -258,7 +260,7 @@ async function processPostQueue() {
               throw new Error(`Falha no download da mídia (Status HTTP ${res.status}) para URL: ${mediaUrl}`);
             }
             const blob = await res.blob();
-            mediaBlobs.push({ blob, description });
+            mediaBlobs.push({ blob, url: mediaUrl, description });
           }
         }
 
@@ -445,107 +447,8 @@ async function startServer() {
 
   // Facebook Webhook Event Receiver
   app.post("/api/webhook/facebook", express.json(), async (req, res) => {
-    const body = req.body;
-
-    if (body.object === "page") {
-      res.status(200).send("EVENT_RECEIVED");
-
-      for (const entry of body.entry) {
-        // 1. Process Feed Changes (Comments)
-        if (entry.changes) {
-          for (const event of entry.changes) {
-            if (event.field === "feed" && event.value.item === "comment" && event.value.verb === "add") {
-              try {
-                const fullPostId = event.value.post_id;
-                const pageId = fullPostId.split('_')[0];
-                const commentId = event.value.comment_id;
-
-                console.log(`[Webhook] New comment: ${fullPostId}`);
-
-                // Respostas privadas desativadas temporariamente conforme solicitação do usuário
-                /*
-                let config = await getAutoReplyConfig(fullPostId, pageId);
-                
-                if (config && config.reply_text) {
-                  console.log(`[Webhook] Target Page: ${pageId}, Comment: ${commentId}, Token: ${config.access_token?.substring(0, 10)}...`);
-                  const replyRes = await sendPrivateReply(commentId, config.reply_text, config.access_token, pageId);
-                  if (replyRes && !replyRes.error) {
-                    console.log(`[Webhook] SUCCESS: Private reply sent.`);
-                  } else {
-                    console.error(`[Webhook] ERROR sending reply to page ${pageId}:`, replyRes?.error);
-                  }
-                }
-                */
-                console.log(`[Webhook] Novo comentário recebido em ${fullPostId}. (Respostas privadas desativadas)`);
-              } catch (err: any) {
-                console.error("[Webhook] Comment Error:", err.message);
-              }
-            }
-          }
-        }
-
-        // 2. Process Messenger Messaging (SIM Flow)
-        if (entry.messaging) {
-          for (const msgEvent of entry.messaging) {
-            if (msgEvent.message && msgEvent.message.text) {
-              try {
-                const senderId = msgEvent.sender.id;
-                const pageId = msgEvent.recipient.id;
-                const text = msgEvent.message.text.toUpperCase();
-
-                console.log(`[Webhook] Message from ${senderId} on page ${pageId}: ${text}`);
-
-                if (text.includes("SIM")) {
-                  console.log(`[Webhook] 'SIM' detected! Sending recipe card...`);
-                  
-                  const { data: configs } = await supabase
-                    .from('post_auto_replies')
-                    .select('access_token')
-                    .eq('page_id', pageId)
-                    .limit(1);
-
-                  const token = configs?.[0]?.access_token;
-                  if (token) {
-                    const cardPayload = {
-                      recipient: { id: senderId },
-                      message: {
-                        attachment: {
-                          type: "template",
-                          payload: {
-                            template_type: "generic",
-                            elements: [{
-                              title: "Sua receita chegou! 🍳",
-                              image_url: "https://receitasdivinosabor.com.br/wp-content/uploads/2023/04/receita-bolo-maracuja.jpg",
-                              subtitle: "Clique no botão abaixo para ver o passo a passo completo.",
-                              buttons: [{
-                                type: "web_url",
-                                url: "https://social-flow-oo9e.onrender.com",
-                                title: "Ver Receita Completa"
-                              }]
-                            }]
-                          }
-                        }
-                      }
-                    };
-
-                    await fetch(`https://graph.facebook.com/v18.0/me/messages?access_token=${token}`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify(cardPayload)
-                    });
-                    console.log("[Webhook] Card sent successfully!");
-                  }
-                }
-              } catch (e: any) {
-                console.error("[Webhook] Messaging Error:", e.message);
-              }
-            }
-          }
-        }
-      }
-    } else {
-      res.sendStatus(404);
-    }
+    console.log("[Webhook] Received event, but webhook features are disabled per user request.");
+    res.status(200).send("EVENT_RECEIVED_BUT_DEACTIVATED");
   });
 
   // Em dev, o Vite roda separado (porta 3000). O backend serve apenas as APIs (porta 3005).
@@ -597,8 +500,8 @@ async function startServer() {
       console.error("[PostQueue Recovery] Failed to execute recovery routine:", recErr.message);
     }
 
-    console.log("[Comment Robot] Starting orchestration...");
-    processComments();
+    console.log("[Comment Robot] Deactivated (as requested by the user).");
+    // processComments();
     console.log("[PostQueue Robot] Starting queue processor...");
     processPostQueue();
   });
