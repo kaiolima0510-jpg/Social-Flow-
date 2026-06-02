@@ -340,14 +340,9 @@ async function processPostQueue() {
                let delaySecs = 0;
                let baseTimeMs = Date.now();
                
-               if (item.is_scheduled && item.scheduled_date) {
-                 let dateStr = item.scheduled_date;
-                 if (!dateStr.includes('Z') && !dateStr.match(/[+-]\d{2}:\d{2}$/)) {
-                   dateStr += "-03:00";
-                 }
-                 const schedMs = new Date(dateStr).getTime();
-                 baseTimeMs = schedMs > Date.now() ? schedMs : Date.now();
-               }
+               if (scheduledTimeUnix !== undefined) {
+                  baseTimeMs = scheduledTimeUnix * 1000;
+                }
                 
               for (const c of item.comments) {
                 if (!c.text) continue;
