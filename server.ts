@@ -19,16 +19,7 @@ const dailyCommentTracker: Record<string, { date: string; count: number }> = {};
 const DAILY_COMMENT_LIMIT = 15; // Max 15 comments per page per day
 
 function checkAndIncrementCommentLimit(pageId: string): boolean {
-  const todayStr = new Date().toISOString().split('T')[0];
-  if (!dailyCommentTracker[pageId] || dailyCommentTracker[pageId].date !== todayStr) {
-    dailyCommentTracker[pageId] = { date: todayStr, count: 0 };
-  }
-  
-  if (dailyCommentTracker[pageId].count >= DAILY_COMMENT_LIMIT) {
-    return false;
-  }
-  
-  dailyCommentTracker[pageId].count++;
+  // Limit disabled per user request
   return true;
 }
 
@@ -150,16 +141,7 @@ const dailyPostTracker: Record<string, { date: string; count: number }> = {};
 const DAILY_POST_LIMIT = 10; // Max 10 posts per page per day
 
 function checkAndIncrementPageLimit(pageId: string): boolean {
-  const todayStr = new Date().toISOString().split('T')[0];
-  if (!dailyPostTracker[pageId] || dailyPostTracker[pageId].date !== todayStr) {
-    dailyPostTracker[pageId] = { date: todayStr, count: 0 };
-  }
-  
-  if (dailyPostTracker[pageId].count >= DAILY_POST_LIMIT) {
-    return false;
-  }
-  
-  dailyPostTracker[pageId].count++;
+  // Limit disabled per user request
   return true;
 }
 
