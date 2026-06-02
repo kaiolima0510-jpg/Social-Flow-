@@ -500,8 +500,8 @@ async function startServer() {
       console.error("[PostQueue Recovery] Failed to execute recovery routine:", recErr.message);
     }
 
-    console.log("[Comment Robot] Deactivated (as requested by the user).");
-    // processComments();
+    console.log("[Comment Robot] Starting orchestration...");
+    processComments();
     console.log("[PostQueue Robot] Starting queue processor...");
     processPostQueue();
   });
