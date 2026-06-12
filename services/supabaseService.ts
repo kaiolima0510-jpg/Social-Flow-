@@ -340,11 +340,14 @@ export const fetchScheduledCommentsSummary = async () => {
 
 export const fetchPendingComments = async () => {
   try {
+    const oneMinuteAgo = new Date(Date.now() - 60000).toISOString();
     const { data, error } = await supabase
       .from('scheduled_comments')
       .select('*')
       .eq('status', 'pending')
-      .order('scheduled_time', { ascending: true });
+      .lte('scheduled_time', oneMinuteAgo)
+      .order('scheduled_time', { ascending: true })
+      .limit(5);
     if (error) {
       console.error("Error fetching pending comments:", error);
       return [];
