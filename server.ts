@@ -105,20 +105,8 @@ async function processComments() {
             errorMsg.toLowerCase().includes('limit') ||
             errorMsg.toLowerCase().includes('rate');
           if (isRateLimit) {
-            const baseMs = 60 * 60 * 1000 * Math.pow(2, comment.attempts || 0);
-            const maxMs = 24 * 60 * 60 * 1000;
-            const jitterMs = (Math.random() * 30 - 15) * 60 * 1000; // +/- 15 min
-            const backoffMs = Math.max(10000, Math.min(baseMs, maxMs) + jitterMs);
-            const retryTime = new Date(Date.now() + backoffMs);
-            console.log(`[Comment Robot] Rate limit/SPAM detected. Rescheduling (Attempt ${nextAttempt}) for: ${retryTime.toISOString()} (backoff: ${Math.round(backoffMs / 1000 / 60)} min)`);
-            await supabase.from('scheduled_comments')
-              .update({ 
-                status: 'pending', 
-                attempts: nextAttempt,
-                scheduled_time: retryTime.toISOString(),
-                error_message: errorMsg
-              })
-              .eq('id', comment.id);
+            console.log(`[Comment Robot] Rate limit/SPAM detected. Marking comment ${comment.id} as failed permanently to avoid backlog.`);
+            await updateScheduledCommentStatus(comment.id, 'failed', `Rate limit/SPAM block: ${errorMsg}`, nextAttempt);
           } else if (nextAttempt >= 20) {
             await updateScheduledCommentStatus(comment.id, 'failed', `Max attempts reached: ${errorMsg}`, nextAttempt);
           } else {
