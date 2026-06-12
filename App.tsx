@@ -55,7 +55,9 @@ const App: React.FC = () => {
     postQueue, removeFromQueue, clearCompletedFromQueue,
     togglePageSelection, handleSelectGroup, handleCreateGroup, deletePageGroup,
     reSyncAccount,
-    addSecurityLog
+    addSecurityLog,
+    spintaxTemplates,
+    setSpintaxTemplates
 
   } = useSocialFlow();
 
@@ -134,6 +136,7 @@ const App: React.FC = () => {
                 deletePageGroup={deletePageGroup}
                 enableRotation={enableRotation}
                 setEnableRotation={setEnableRotation}
+                spintaxTemplates={spintaxTemplates}
               />
             )}
 
@@ -152,6 +155,8 @@ const App: React.FC = () => {
                 togglePageSelection={togglePageSelection}
                 setIsGroupModalOpen={setIsGroupModalOpen}
                 reSyncAccount={reSyncAccount}
+                spintaxTemplates={spintaxTemplates}
+                setSpintaxTemplates={setSpintaxTemplates}
               />
             )}
 

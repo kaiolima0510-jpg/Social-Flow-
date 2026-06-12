@@ -20,7 +20,7 @@ interface EditorTabProps {
   setUseAI: (v: boolean) => void;
   manualData: {
     caption: string;
-    comments: { text: string; delay: number }[];
+    comments: { text: string; delay: number; useSpintax?: boolean }[];
     autoReplyText?: string;
     scheduledDate: string;
     storyLink: string;
@@ -47,6 +47,7 @@ interface EditorTabProps {
   sheetRows: any[];
   setSheetRows: (r: any[]) => void;
   setActiveTab: (tab: any) => void;
+  spintaxTemplates: string;
 }
 
 const EditorTab: React.FC<EditorTabProps> = ({
@@ -56,7 +57,8 @@ const EditorTab: React.FC<EditorTabProps> = ({
   isProcessing, sheetUrl, setSheetUrl, handleSyncSheet, isSyncingSheet,
   bulkFiles, handleBulkFilesUpload, bulkType, setBulkType, handleRunBulk,
   enableRotation, setEnableRotation,
-  sheetRows, setSheetRows, setActiveTab
+  sheetRows, setSheetRows, setActiveTab,
+  spintaxTemplates
 }) => {
   const [previewMode, setPreviewMode] = React.useState<PreviewMode>('MANUAL');
 
@@ -321,7 +323,7 @@ const EditorTab: React.FC<EditorTabProps> = ({
                     <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div> Shadow Comments
                   </label>
                   <button 
-                    onClick={() => setManualData((p: any) => ({ ...p, comments: [...p.comments, { text: "", delay: 0 }] }))}
+                    onClick={() => setManualData((p: any) => ({ ...p, comments: [...p.comments, { text: "", delay: 0, useSpintax: false }] }))}
                     className="text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-800 transition-colors flex items-center gap-1"
                   >
                     + Adicionar Comentário
@@ -330,7 +332,25 @@ const EditorTab: React.FC<EditorTabProps> = ({
                 
                 {manualData.comments?.map((c: any, index: number) => (
                   <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start relative group/comment">
-                    <div className="md:col-span-8 space-y-2">
+                    <div className="md:col-span-8 space-y-3">
+                       <div className="flex items-center justify-between px-3 bg-slate-50 dark:bg-slate-800/40 py-2 rounded-xl border border-slate-100 dark:border-slate-800/20">
+                         <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 truncate max-w-[70%]">
+                           Variação: <span className="font-mono text-indigo-600 dark:text-indigo-400">{spintaxTemplates}</span>
+                         </span>
+                         <label className="flex items-center gap-2 cursor-pointer select-none">
+                           <input 
+                             type="checkbox" 
+                             checked={!!c.useSpintax}
+                             onChange={e => {
+                               const newComments = [...manualData.comments];
+                               newComments[index].useSpintax = e.target.checked;
+                               setManualData((p: any) => ({...p, comments: newComments}));
+                             }}
+                             className="rounded border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                           />
+                           <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Ativar</span>
+                         </label>
+                       </div>
                        <textarea 
                          value={c.text} 
                          onChange={e => {

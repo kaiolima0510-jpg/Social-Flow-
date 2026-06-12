@@ -17,13 +17,16 @@ interface GatewaysTabProps {
   togglePageSelection: (id: string) => void;
   setIsGroupModalOpen: (o: boolean) => void;
   reSyncAccount: (acc: FacebookAccount) => Promise<void>;
+  spintaxTemplates: string;
+  setSpintaxTemplates: (s: string) => void;
 }
 
 const GatewaysTab: React.FC<GatewaysTabProps> = ({
   accounts, setIsImportModalOpen, onDisconnect,
   selectedPageIds, setSelectedPageIds, pageSearch, setPageSearch,
   pageGroups, handleSelectGroup, deletePageGroup, togglePageSelection,
-  setIsGroupModalOpen, reSyncAccount
+  setIsGroupModalOpen, reSyncAccount,
+  spintaxTemplates, setSpintaxTemplates
 }) => {
   const allPages = useMemo(
     () => accounts.flatMap(acc => (acc.pages || [])),
@@ -131,6 +134,28 @@ const GatewaysTab: React.FC<GatewaysTabProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+
+            {/* SPINTAX TEMPLATES CARD */}
+            <div className="bg-white dark:bg-[#0f172a] p-8 rounded-[2.5rem] border border-slate-100 dark:border-slate-800/50 shadow-sm space-y-5 animate-fade-up">
+              <div className="flex items-center gap-4">
+                <div className="p-3 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-2xl">
+                  <Zap size={20} strokeWidth={2.5}/>
+                </div>
+                <div>
+                  <h4 className="text-[14px] font-black text-slate-900 dark:text-white leading-tight uppercase">Variações de Comentário</h4>
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Modelo Spintax Pré-Pronto</p>
+                </div>
+              </div>
+
+              <textarea
+                value={spintaxTemplates}
+                onChange={e => setSpintaxTemplates(e.target.value)}
+                rows={5}
+                className="w-full bg-slate-50 dark:bg-white/5 border-2 border-slate-50 dark:border-slate-800/40 rounded-[2rem] px-5 py-4 text-xs font-bold text-slate-700 dark:text-slate-300 placeholder-slate-400 focus:outline-none focus:border-indigo-500 resize-y outline-none transition-all"
+                placeholder="Ex: {Confira essa receita|Olha essa delícia|Veja que maravilhoso}"
+              />
+              <p className="text-[10px] font-bold text-slate-400 leading-relaxed uppercase tracking-wider">Cada comentário com variações ativas puxará uma frase deste modelo aleatoriamente antes do texto principal.</p>
             </div>
           </div>
 

@@ -163,9 +163,18 @@ export const useSocialFlow = () => {
   }, []);
 
 
+  // ===== SPINTAX VARIATIONS TEMPLATE =====
+  const [spintaxTemplates, setSpintaxTemplates] = useState(() => {
+    return localStorage.getItem('sf_spintax_templates') || "{Confira essa receita|Olha essa delícia|Veja que maravilhoso}";
+  });
+
+  useEffect(() => {
+    localStorage.setItem('sf_spintax_templates', spintaxTemplates);
+  }, [spintaxTemplates]);
+
   const [manualData, setManualData] = useState({
     caption: "", 
-    comments: [{ text: "", delay: 0 }], 
+    comments: [{ text: "", delay: 0, useSpintax: false }], 
     autoReplyText: "",
     scheduledDate: "",
     storyLink: "", 
@@ -641,7 +650,10 @@ export const useSocialFlow = () => {
          label,
          type: manualData.type,
          caption: manualData.caption,
-         comments: manualData.comments,
+         comments: manualData.comments.map(c => ({
+           text: c.useSpintax ? `${spintaxTemplates} ${c.text}` : c.text,
+           delay: c.delay
+         })),
          autoReplyText: manualData.autoReplyText,
          storyLink: manualData.storyLink,
          isScheduled,
@@ -658,7 +670,7 @@ export const useSocialFlow = () => {
       // Clear the form immediately so user can start next post
       setManualData({
         caption: '',
-        comments: [{ text: "", delay: 0 }],
+        comments: [{ text: "", delay: 0, useSpintax: false }],
         autoReplyText: '',
         scheduledDate: '',
         storyLink: '',
@@ -771,6 +783,7 @@ export const useSocialFlow = () => {
     postQueue, removeFromQueue, clearCompletedFromQueue,
     togglePageSelection, handleSelectGroup, handleCreateGroup, deletePageGroup: deletePageGroupById,
     reSyncAccount,
-    addSecurityLog
+    addSecurityLog,
+    spintaxTemplates, setSpintaxTemplates
   };
 };
