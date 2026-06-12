@@ -1,22 +1,22 @@
-import { supabase } from '../services/supabaseService';
+import { supabase } from "../services/supabaseService";
 
 async function main() {
-  console.log("=== CHECKING PAGES FOR SCHEDULED COMMENTS ===");
-  const { data: comments, error } = await supabase
+  const { data, error } = await supabase
     .from('scheduled_comments')
     .select('*')
-    .order('scheduled_time', { ascending: false })
+    .eq('page_id', '122208281030575678')
+    .order('created_at', { ascending: false })
     .limit(10);
-    
+
   if (error) {
-    console.error(error);
+    console.error("Error:", error);
     return;
   }
-  
-  for (const c of comments || []) {
-    const { data: page } = await supabase.from('fb_pages').select('name').eq('fb_id', c.page_id).maybeSingle();
-    console.log(` - Comment ID: ${c.id}, PageID: ${c.page_id}, Page Name: "${page?.name || 'UNKNOWN'}", Status: ${c.status}, Time: ${c.scheduled_time}`);
-  }
+
+  console.log("Recent comments for Sabores Autênticos:");
+  data?.forEach(c => {
+    console.log(` - ID: ${c.id}, Status: ${c.status}, FB_PostID: ${c.fb_post_id}, Error: ${c.error_message}, Text: "${c.comment_text?.substring(0, 30)}..."`);
+  });
 }
 
 main().catch(console.error);

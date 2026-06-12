@@ -148,14 +148,7 @@ const dailyPostTracker: Record<string, { date: string; count: number }> = {};
 const DAILY_POST_LIMIT = 10; // Max 10 posts per page per day
 
 function checkAndIncrementPageLimit(pageId: string): boolean {
-  const today = new Date().toISOString().split('T')[0];
-  if (!dailyPostTracker[pageId] || dailyPostTracker[pageId].date !== today) {
-    dailyPostTracker[pageId] = { date: today, count: 0 };
-  }
-  if (dailyPostTracker[pageId].count >= DAILY_POST_LIMIT) {
-    return false;
-  }
-  dailyPostTracker[pageId].count++;
+  // Limit disabled per user request
   return true;
 }
 
