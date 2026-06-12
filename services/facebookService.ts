@@ -269,11 +269,7 @@ export const postToFacebook = async (
       } else if (effectiveType === 'VIDEO') {
         const fd = new FormData();
         fd.append('access_token', token);
-        if (media[0]?.url) {
-          fd.append('file_url', media[0].url);
-        } else {
-          fd.append('source', media[0].blob, 'video.mp4');
-        }
+        fd.append('source', media[0].blob, 'video.mp4');
         fd.append('description', caption);
         if (scheduledTime) {
           fd.append('scheduled_publish_time', scheduledTime.toString());
@@ -284,11 +280,7 @@ export const postToFacebook = async (
       } else if (effectiveType === 'SINGLE') {
         const fd = new FormData();
         fd.append('access_token', token);
-        if (media[0]?.url) {
-          fd.append('url', media[0].url);
-        } else {
-          fd.append('source', media[0].blob, 'photo.jpg');
-        }
+        fd.append('source', media[0].blob, 'photo.jpg');
         fd.append('caption', caption);
         if (scheduledTime) {
           fd.append('scheduled_publish_time', scheduledTime.toString());
@@ -301,11 +293,7 @@ export const postToFacebook = async (
         for (const m of media) {
           const fd = new FormData();
           fd.append('access_token', token);
-          if (m.url) {
-            fd.append('url', m.url);
-          } else {
-            fd.append('source', m.blob, 'item.jpg');
-          }
+          fd.append('source', m.blob, 'item.jpg');
           fd.append('caption', m.description || "");
           fd.append('published', '0');
           const res = await fetch(`${FB_GRAPH_URL}/${pageId}/photos`, { method: 'POST', body: fd, headers: BROWSER_HEADERS });

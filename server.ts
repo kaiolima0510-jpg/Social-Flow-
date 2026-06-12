@@ -19,7 +19,14 @@ const dailyCommentTracker: Record<string, { date: string; count: number }> = {};
 const DAILY_COMMENT_LIMIT = 15; // Max 15 comments per page per day
 
 function checkAndIncrementCommentLimit(pageId: string): boolean {
-  // Limit disabled per user request
+  const today = new Date().toISOString().split('T')[0];
+  if (!dailyCommentTracker[pageId] || dailyCommentTracker[pageId].date !== today) {
+    dailyCommentTracker[pageId] = { date: today, count: 0 };
+  }
+  if (dailyCommentTracker[pageId].count >= DAILY_COMMENT_LIMIT) {
+    return false;
+  }
+  dailyCommentTracker[pageId].count++;
   return true;
 }
 
@@ -120,7 +127,7 @@ async function processComments() {
           }
         }
         // Delay maior entre postagens para evitar bloqueio por SPAM do Facebook
-        await new Promise(r => setTimeout(r, 5000 + Math.random() * 10000)); // 5–15s aleatório (anti-padrão)
+        await new Promise(r => setTimeout(r, 15000 + Math.random() * 30000)); // 15–45s aleatório
       } catch (e: any) {
         console.error(`[Comment Robot] CRITICAL ERROR for comment ${comment.id}:`, e.message);
         await updateScheduledCommentStatus(comment.id, 'failed', e.message, (comment.attempts || 0) + 1);
@@ -141,7 +148,14 @@ const dailyPostTracker: Record<string, { date: string; count: number }> = {};
 const DAILY_POST_LIMIT = 10; // Max 10 posts per page per day
 
 function checkAndIncrementPageLimit(pageId: string): boolean {
-  // Limit disabled per user request
+  const today = new Date().toISOString().split('T')[0];
+  if (!dailyPostTracker[pageId] || dailyPostTracker[pageId].date !== today) {
+    dailyPostTracker[pageId] = { date: today, count: 0 };
+  }
+  if (dailyPostTracker[pageId].count >= DAILY_POST_LIMIT) {
+    return false;
+  }
+  dailyPostTracker[pageId].count++;
   return true;
 }
 
@@ -154,16 +168,13 @@ async function processPostQueue() {
     
     if (pendingItems.length === 0) return;
 
-    // Check Blackout Window (23h - 5h BRT / UTC-3) - Disabled per user request to allow 24/7 posting
-    /*
-    const brTime = new Date(new Date().getTime() - 3 * 60 * 60 * 1000);
-    const brHour = brTime.getUTCHours();
+    // Check Posting Window (Allowed only between 5h and 23h BRT / UTC-3)
+    const brHour = parseInt(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo", hour: "2-digit", hour12: false }));
     if (brHour >= 23 || brHour < 5) {
-      console.log(`[PostQueue Robot] Blackout window ativa (23h - 5h BRT). Processamento de posts suspenso.`);
+      console.log(`[PostQueue Robot] Fora do horário permitido (5h às 23h BRT). Processamento de posts suspenso.`);
       setTimeout(processPostQueue, POST_QUEUE_INTERVAL);
       return;
     }
-    */
 
     for (const item of pendingItems) {
       console.log(`[PostQueue] Starting processing for item: ${item.label} (${item.id})`);
@@ -242,129 +253,155 @@ async function processPostQueue() {
               throw new Error(`Falha no download da mídia (Status HTTP ${res.status}) para URL: ${mediaUrl}`);
             }
             const blob = await res.blob();
-            mediaBlobs.push({ blob, url: mediaUrl, description });
+        mediaBlobs.push({ blob, url: mediaUrl, description });
           }
         }
 
         let totalSuccess = 0;
         let totalFailed = 0;
 
-        for (const page of item.pages) {
-          // Check if item was cancelled/deleted from queue in real-time by the user
-          const { data: dbCheck } = await supabase
+        // Auto-batching: split pages into groups of 5 pages to respect Meta security guidelines
+        const chunkSize = 5;
+        const pageChunks: any[][] = [];
+        for (let i = 0; i < item.pages.length; i += chunkSize) {
+          pageChunks.push(item.pages.slice(i, i + chunkSize));
+        }
+
+        for (let chunkIndex = 0; chunkIndex < pageChunks.length; chunkIndex++) {
+          const chunk = pageChunks[chunkIndex];
+          logMsg(`Processando lote ${chunkIndex + 1} de ${pageChunks.length} (Contém ${chunk.length} páginas)...`);
+
+          for (const page of chunk) {
+            // Check if item was cancelled/deleted from queue in real-time by the user
+            const { data: dbCheck } = await supabase
+              .from('post_queue')
+              .select('id')
+              .eq('id', item.id)
+              .maybeSingle();
+
+            if (!dbCheck) {
+              console.log(`[PostQueue] Item ${item.id} was deleted/cancelled by the user. Aborting deployments.`);
+              break; // Immediately exit the page loop!
+            }
+
+            logMsg(`Deploying to ${page.name}...`);
+            
+            // Verify daily limit for the page
+            if (!checkAndIncrementPageLimit(page.fb_id)) {
+               logMsg(`[Stealth Warning] Daily limit of ${DAILY_POST_LIMIT} posts reached for page "${page.name}". Skipping to protect the account.`);
+               totalFailed++;
+               await updatePostQueueStatus(item.id, { logs });
+               continue;
+            }
+            
+            // update progress
+            await updatePostQueueStatus(item.id, { logs });
+            
+             let scheduledTimeUnix: number | undefined = undefined;
+             if (item.is_scheduled && item.scheduled_date) {
+               let dateStr = item.scheduled_date;
+               // Se a data vier do HTML datetime-local sem fuso horário, assumimos horário de Brasília (UTC-3)
+               if (!dateStr.includes('Z') && !dateStr.match(/[+-]\d{2}:\d{2}$/)) {
+                 dateStr += "-03:00";
+               }
+               scheduledTimeUnix = Math.floor(new Date(dateStr).getTime() / 1000);
+               
+               // Meta API safety check: if scheduled time is in the past or less than 10 minutes in the future,
+               // convert it into an immediate live post to avoid Facebook rejecting it.
+               const tenMinutesFromNow = Math.floor(Date.now() / 1000) + 10 * 60;
+               if (scheduledTimeUnix < tenMinutesFromNow) {
+                 logMsg(`[Stealth Redirect] O horário agendado (${new Date(dateStr).toLocaleString()}) está no passado ou muito próximo. Publicando IMEDIATAMENTE.`);
+                 scheduledTimeUnix = undefined; // Null triggers an immediate post
+               } else {
+                 logMsg(`Post is scheduled for: ${new Date(dateStr).toLocaleString()} (Unix: ${scheduledTimeUnix})`);
+               }
+             }
+ 
+             const res = await postToFacebook(
+               page.access_token,
+               page.fb_id,
+               item.caption,
+               mediaBlobs,
+               scheduledTimeUnix,
+               item.type,
+               item.story_link
+             );
+ 
+             if (res.success) {
+               logMsg(`[OK] Success on ${page.name}. ID: ${res.id}`);
+               
+               // Prevent duplicate scheduling: Check if comments have already been scheduled for this post ID
+               const { data: existingComments } = await supabase
+                 .from('scheduled_comments')
+                 .select('id')
+                 .eq('fb_post_id', res.id)
+                 .limit(1);
+
+               if (existingComments && existingComments.length > 0) {
+                 logMsg(`[Stealth Guard] Comments already scheduled for post ${res.id} in a previous attempt. Skipping duplicate scheduling.`);
+               } else if (item.comments && item.comments.length > 0) {
+                 logMsg(`Scheduling ${item.comments.length} comments for ${page.name}...`);
+                 let delaySecs = 0;
+                 let baseTimeMs = Date.now();
+                 
+                 if (scheduledTimeUnix !== undefined) {
+                    baseTimeMs = scheduledTimeUnix * 1000;
+                  }
+                  
+                for (const c of item.comments) {
+                  if (!c.text) continue;
+                  delaySecs += (c.delay || 0);
+                  
+                  // Humanized offset: 90 to 240 seconds randomized offset per page
+                  // to distribute comments across pages and mimic human activity.
+                  const humanizedOffsetSecs = 90 + Math.floor(Math.random() * 150);
+                  const totalDelaySecs = delaySecs + humanizedOffsetSecs;
+                  
+                  const schedTime = new Date(baseTimeMs + totalDelaySecs * 1000).toISOString();
+                  logMsg(`Comment scheduled for ${page.name} with humanized offset of ${humanizedOffsetSecs}s (Total delay: ${totalDelaySecs}s)`);
+                  
+                  await scheduleComment({
+                    page_id: page.fb_id,
+                    access_token: page.access_token,
+                    fb_post_id: res.id,
+                    comment_text: parseSpintax(c.text),
+                    scheduled_time: schedTime
+                  });
+                }
+              }
+              
+              // Saving auto reply if any
+              if (item.auto_reply_text) {
+                 logMsg(`Saving auto-reply for ${page.name}...`);
+                 await saveAutoReplyConfig(page.fb_id, res.id, item.auto_reply_text, page.access_token);
+              }
+  
+              totalSuccess++;
+            } else {
+              logMsg(`[FAIL] Error on ${page.name}: ${res.error}`);
+              totalFailed++;
+            }
+            currentProgress++;
+            await updatePostQueueStatus(item.id, { progress_current: currentProgress, logs });
+            
+            // Anti-spam delay aleatorio dentro do lote: 5–15s
+            await new Promise(r => setTimeout(r, 5000 + Math.random() * 10000)); 
+          }
+
+          // Check if item was cancelled/deleted between batches
+          const { data: dbCheckAfterChunk } = await supabase
             .from('post_queue')
             .select('id')
             .eq('id', item.id)
             .maybeSingle();
+          if (!dbCheckAfterChunk) break;
 
-          if (!dbCheck) {
-            console.log(`[PostQueue] Item ${item.id} was deleted/cancelled by the user. Aborting deployments.`);
-            break; // Immediately exit the page loop!
+          // Se houver mais lotes para rodar, faz uma pausa maior de segurança (5 a 10 minutos)
+          if (chunkIndex < pageChunks.length - 1) {
+            const batchWaitMin = 5 + Math.floor(Math.random() * 6); // 5–10 minutos
+            logMsg(`Lote ${chunkIndex + 1} finalizado. Aguardando ${batchWaitMin} minutos de pausa de segurança antes de iniciar o próximo lote...`);
+            await new Promise(r => setTimeout(r, batchWaitMin * 60 * 1000));
           }
-
-          logMsg(`Deploying to ${page.name}...`);
-          
-          // Verify daily limit for the page
-          if (!checkAndIncrementPageLimit(page.fb_id)) {
-             logMsg(`[Stealth Warning] Daily limit of ${DAILY_POST_LIMIT} posts reached for page "${page.name}". Skipping to protect the account.`);
-             totalFailed++;
-             await updatePostQueueStatus(item.id, { logs });
-             continue;
-          }
-          
-          // update progress
-          await updatePostQueueStatus(item.id, { logs });
-          
-           let scheduledTimeUnix: number | undefined = undefined;
-           if (item.is_scheduled && item.scheduled_date) {
-             let dateStr = item.scheduled_date;
-             // Se a data vier do HTML datetime-local sem fuso horário, assumimos horário de Brasília (UTC-3)
-             if (!dateStr.includes('Z') && !dateStr.match(/[+-]\d{2}:\d{2}$/)) {
-               dateStr += "-03:00";
-             }
-             scheduledTimeUnix = Math.floor(new Date(dateStr).getTime() / 1000);
-             
-             // Meta API safety check: if scheduled time is in the past or less than 10 minutes in the future,
-             // convert it into an immediate live post to avoid Facebook rejecting it.
-             const tenMinutesFromNow = Math.floor(Date.now() / 1000) + 10 * 60;
-             if (scheduledTimeUnix < tenMinutesFromNow) {
-               logMsg(`[Stealth Redirect] O horário agendado (${new Date(dateStr).toLocaleString()}) está no passado ou muito próximo. Publicando IMEDIATAMENTE.`);
-               scheduledTimeUnix = undefined; // Null triggers an immediate post
-             } else {
-               logMsg(`Post is scheduled for: ${new Date(dateStr).toLocaleString()} (Unix: ${scheduledTimeUnix})`);
-             }
-           }
- 
-           const res = await postToFacebook(
-             page.access_token,
-             page.fb_id,
-             item.caption,
-             mediaBlobs,
-             scheduledTimeUnix,
-             item.type,
-             item.story_link
-           );
- 
-           if (res.success) {
-             logMsg(`[OK] Success on ${page.name}. ID: ${res.id}`);
-             
-             // Prevent duplicate scheduling: Check if comments have already been scheduled for this post ID
-             const { data: existingComments } = await supabase
-               .from('scheduled_comments')
-               .select('id')
-               .eq('fb_post_id', res.id)
-               .limit(1);
-
-             if (existingComments && existingComments.length > 0) {
-               logMsg(`[Stealth Guard] Comments already scheduled for post ${res.id} in a previous attempt. Skipping duplicate scheduling.`);
-             } else if (item.comments && item.comments.length > 0) {
-               logMsg(`Scheduling ${item.comments.length} comments for ${page.name}...`);
-               let delaySecs = 0;
-               let baseTimeMs = Date.now();
-               
-               if (scheduledTimeUnix !== undefined) {
-                  baseTimeMs = scheduledTimeUnix * 1000;
-                }
-                
-              for (const c of item.comments) {
-                if (!c.text) continue;
-                delaySecs += (c.delay || 0);
-                
-                // Humanized offset: 90 to 240 seconds randomized offset per page
-                // to distribute comments across pages and mimic human activity.
-                const humanizedOffsetSecs = 90 + Math.floor(Math.random() * 150);
-                const totalDelaySecs = delaySecs + humanizedOffsetSecs;
-                
-                const schedTime = new Date(baseTimeMs + totalDelaySecs * 1000).toISOString();
-                logMsg(`Comment scheduled for ${page.name} with humanized offset of ${humanizedOffsetSecs}s (Total delay: ${totalDelaySecs}s)`);
-                
-                await scheduleComment({
-                  page_id: page.fb_id,
-                  access_token: page.access_token,
-                  fb_post_id: res.id,
-                  comment_text: parseSpintax(c.text),
-                  scheduled_time: schedTime
-                });
-              }
-            }
-            
-            // Saving auto reply if any
-            if (item.auto_reply_text) {
-               logMsg(`Saving auto-reply for ${page.name}...`);
-               await saveAutoReplyConfig(page.fb_id, res.id, item.auto_reply_text, page.access_token);
-            }
-
-            totalSuccess++;
-            currentProgress++;
-            await updatePostQueueStatus(item.id, { progress_current: currentProgress, logs });
-          } else {
-            logMsg(`[FAIL] Error on ${page.name}: ${res.error}`);
-            totalFailed++;
-            await updatePostQueueStatus(item.id, { logs });
-          }
-          
-          // Anti-spam delay aleatorio (evita padrão fixo detectável pelo Facebook)
-          await new Promise(r => setTimeout(r, 4000 + Math.random() * 8000)); // 4–12s
         }
 
         const finalStatus = totalFailed === item.pages.length ? 'error' : 'done';
