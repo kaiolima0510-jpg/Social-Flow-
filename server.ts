@@ -377,11 +377,11 @@ async function processPostQueue() {
             .maybeSingle();
           if (!dbCheckAfterChunk) break;
 
-          // Se houver mais lotes para rodar, faz uma pausa maior de segurança (5 a 10 minutos)
+          // Se houver mais lotes para rodar, faz uma pausa maior de segurança (30 a 60 segundos)
           if (chunkIndex < pageChunks.length - 1) {
-            const batchWaitMin = 5 + Math.floor(Math.random() * 6); // 5–10 minutos
-            logMsg(`Lote ${chunkIndex + 1} finalizado. Aguardando ${batchWaitMin} minutos de pausa de segurança antes de iniciar o próximo lote...`);
-            await new Promise(r => setTimeout(r, batchWaitMin * 60 * 1000));
+            const batchWaitSec = 30 + Math.floor(Math.random() * 31); // 30–60 segundos
+            logMsg(`Lote ${chunkIndex + 1} finalizado. Aguardando ${batchWaitSec} segundos de pausa de segurança antes de iniciar o próximo lote...`);
+            await new Promise(r => setTimeout(r, batchWaitSec * 1000));
           }
         }
 
