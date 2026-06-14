@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
-const COMMENT_CHECK_INTERVAL = () => 45000 + Math.random() * 45000; // 45–90s aleatório (anti-padrão)
+const COMMENT_CHECK_INTERVAL = () => 15000 + Math.random() * 15000; // 15–30s aleatório
 
 // Keep track of comments per page per day to protect from SPAM blocks
 const dailyCommentTracker: Record<string, { date: string; count: number }> = {};
@@ -115,7 +115,7 @@ async function processComments() {
           }
         }
         // Delay maior entre postagens para evitar bloqueio por SPAM do Facebook
-        await new Promise(r => setTimeout(r, 15000 + Math.random() * 30000)); // 15–45s aleatório
+        await new Promise(r => setTimeout(r, 5000 + Math.random() * 10000)); // 5–15s aleatório
       } catch (e: any) {
         console.error(`[Comment Robot] CRITICAL ERROR for comment ${comment.id}:`, e.message);
         await updateScheduledCommentStatus(comment.id, 'failed', e.message, (comment.attempts || 0) + 1);
@@ -333,9 +333,9 @@ async function processPostQueue() {
                   if (!c.text) continue;
                   delaySecs += (c.delay || 0);
                   
-                  // Humanized offset: 90 to 240 seconds randomized offset per page
+                  // Humanized offset: 15 to 45 seconds randomized offset per page
                   // to distribute comments across pages and mimic human activity.
-                  const humanizedOffsetSecs = 90 + Math.floor(Math.random() * 150);
+                  const humanizedOffsetSecs = 15 + Math.floor(Math.random() * 30);
                   const totalDelaySecs = delaySecs + humanizedOffsetSecs;
                   
                   const schedTime = new Date(baseTimeMs + totalDelaySecs * 1000).toISOString();

@@ -347,7 +347,7 @@ export const fetchPendingComments = async () => {
       .eq('status', 'pending')
       .lte('scheduled_time', oneMinuteAgo)
       .order('scheduled_time', { ascending: true })
-      .limit(5);
+      .limit(15);
     if (error) {
       console.error("Error fetching pending comments:", error);
       return [];
