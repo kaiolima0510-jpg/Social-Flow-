@@ -85,6 +85,7 @@ export const useSocialFlow = () => {
     });
   };
   const [accounts, setAccounts] = useState<FacebookAccount[]>([]);
+  const isSubmittingRef = useRef(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
@@ -614,6 +615,7 @@ export const useSocialFlow = () => {
 
   // ===== ADD TO QUEUE (Server-Side) =====
   const addToQueue = async (isScheduled: boolean) => {
+    if (isSubmittingRef.current) return;
     if (manualData.media.length === 0) return alert('Escolha uma imagem ou vídeo.');
     const activePages = accounts
       .flatMap(acc => (acc.pages || []).map(p => ({ ...p, parentToken: acc.token })))
@@ -626,6 +628,7 @@ export const useSocialFlow = () => {
     );
     const label = `${selectedGroup?.name || 'Manual'} – ${manualData.type}`;
 
+    isSubmittingRef.current = true;
     setIsProcessing(true);
     try {
       addSecurityLog(`UPLOADING: Fazendo upload de ${manualData.media.length} arquivos...`);
@@ -683,6 +686,7 @@ export const useSocialFlow = () => {
       addSecurityLog(`FAIL: Erro ao enfileirar: ${e.message}`);
     } finally {
       setIsProcessing(false);
+      isSubmittingRef.current = false;
     }
   };
 
