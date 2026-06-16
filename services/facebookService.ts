@@ -243,7 +243,8 @@ export const postToFacebook = async (
     }
   } catch (e) {}
 
-  for (let attempt = 0; attempt <= 3; attempt++) {
+  const maxAttempts = 2;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       let responseData: any;
       let effectiveType = type;
@@ -298,25 +299,32 @@ export const postToFacebook = async (
           fd.append('published', '0');
           const res = await fetch(`${FB_GRAPH_URL}/${pageId}/photos`, { method: 'POST', body: fd, headers: BROWSER_HEADERS });
           const d = await res.json();
+          if (d.error) {
+            responseData = d;
+            break;
+          }
           if (d.id) mediaIds.push(d.id);
         }
-        const feedFd = new FormData();
-        feedFd.append('access_token', token);
-        feedFd.append('message', caption);
-        feedFd.append('attached_media', JSON.stringify(mediaIds.map(id => ({ media_fbid: id }))));
-        if (scheduledTime) {
-          feedFd.append('scheduled_publish_time', scheduledTime.toString());
-          feedFd.append('published', '0');
+
+        if (!responseData?.error) {
+          const feedFd = new FormData();
+          feedFd.append('access_token', token);
+          feedFd.append('message', caption);
+          feedFd.append('attached_media', JSON.stringify(mediaIds.map(id => ({ media_fbid: id }))));
+          if (scheduledTime) {
+            feedFd.append('scheduled_publish_time', scheduledTime.toString());
+            feedFd.append('published', '0');
+          }
+          const finalRes = await fetch(`${FB_GRAPH_URL}/${pageId}/feed`, { method: 'POST', body: feedFd, headers: BROWSER_HEADERS });
+          responseData = await finalRes.json();
         }
-        const finalRes = await fetch(`${FB_GRAPH_URL}/${pageId}/feed`, { method: 'POST', body: feedFd, headers: BROWSER_HEADERS });
-        responseData = await finalRes.json();
       }
 
       if (responseData.error) {
         lastError = responseData.error;
-        if (attempt < 3) {
+        if (attempt < maxAttempts - 1) {
           const delay = retryDelays[attempt];
-          console.warn(`[FB Publisher] Facebook API returned error (Attempt ${attempt + 1}/4): ${lastError.message}. Waiting ${delay/1000}s before retry...`);
+          console.warn(`[FB Publisher] Facebook API returned error (Attempt ${attempt + 1}/${maxAttempts}): ${lastError.message}. Waiting ${delay/1000}s before retry...`);
           await wait(delay);
           continue;
         }
@@ -326,9 +334,9 @@ export const postToFacebook = async (
       return { success: true, id: responseData.id || responseData.post_id };
     } catch (e: any) {
       lastError = e;
-      if (attempt < 3) {
+      if (attempt < maxAttempts - 1) {
         const delay = retryDelays[attempt];
-        console.warn(`[FB Publisher] Connection failure / Exception (Attempt ${attempt + 1}/4): ${lastError.message}. Waiting ${delay/1000}s before retry...`);
+        console.warn(`[FB Publisher] Connection failure / Exception (Attempt ${attempt + 1}/${maxAttempts}): ${lastError.message}. Waiting ${delay/1000}s before retry...`);
         await wait(delay);
         continue;
       }

@@ -7,8 +7,8 @@
     "dev": "concurrently \"tsx watch --env-file=.env server.ts\" \"vite\" --names \"backend,frontend\" --prefix-colors \"cyan,magenta\"",
     "backend": "tsx watch --env-file=.env server.ts",
     "frontend": "vite",
-    "start": "tsx server.ts",
-    "build": "vite build",
+    "start": "node --max-old-space-size=400 dist/server.js",
+    "build": "vite build && npx esbuild server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --format=esm --external:express --external:@supabase/supabase-js --external:@google/genai",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
   },

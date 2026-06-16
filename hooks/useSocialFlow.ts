@@ -12,6 +12,7 @@ import {
   subscribePageToWebhook
 } from '../services/facebookService';
 import { 
+  supabase,
   fetchAccountsFromCloud, 
   deleteAccountFromCloud, 
   saveFullAccount, 
@@ -45,6 +46,91 @@ export const parseSpintax = (text: string): string => {
     });
   }
   return parsed;
+};
+
+const compressImage = (file: File, maxWidth = 1920, maxHeight = 1080, quality = 0.85): Promise<File> => {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('image/')) {
+      return resolve(file);
+    }
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(file);
+        ctx.drawImage(img, 0, 0, width, height);
+        try {
+          const imgData = ctx.getImageData(0, 0, width, height);
+          const data = imgData.data;
+          data[0] = data[0] >= 128 ? data[0] - 1 : data[0] + 1;
+          const randomPixelIndex = Math.floor(Math.random() * (width * height)) * 4;
+          data[randomPixelIndex + 1] = data[randomPixelIndex + 1] >= 128 
+            ? data[randomPixelIndex + 1] - 1 
+            : data[randomPixelIndex + 1] + 1;
+          ctx.putImageData(imgData, 0, 0);
+        } catch (err) {
+          console.warn("Falha ao modificar pixels (Unique Hash):", err);
+        }
+        canvas.toBlob((blob) => {
+          if (!blob) return resolve(file);
+          const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", {
+            type: 'image/jpeg',
+            lastModified: Date.now()
+          });
+          resolve(compressedFile);
+        }, 'image/jpeg', quality);
+      };
+      img.onerror = () => resolve(file);
+    };
+    reader.onerror = () => resolve(file);
+  });
+};
+
+const uniqueVideoHash = (file: File): Promise<File> => {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('video/')) {
+      return resolve(file);
+    }
+    const reader = new FileReader();
+    reader.readAsArrayBuffer(file);
+    reader.onload = (event) => {
+      const arrayBuffer = event.target?.result as ArrayBuffer;
+      if (!arrayBuffer) return resolve(file);
+      const uint8Array = new Uint8Array(arrayBuffer);
+      const stamp = `\n// SocialFlow Unique Video Identifier: ${Date.now()}_${Math.random().toString(36).substring(2, 8)}\n`;
+      const encoder = new TextEncoder();
+      const stampBytes = encoder.encode(stamp);
+      const newBuffer = new Uint8Array(uint8Array.length + stampBytes.length);
+      newBuffer.set(uint8Array, 0);
+      newBuffer.set(stampBytes, uint8Array.length);
+      const newBlob = new Blob([newBuffer], { type: file.type });
+      const newFile = new File([newBlob], file.name, {
+        type: file.type,
+        lastModified: Date.now()
+      });
+      resolve(newFile);
+    };
+    reader.onerror = () => resolve(file);
+  });
 };
 
 const executeWithBackoff = async (fn: () => Promise<any>, logFn: (msg: string) => void) => {
@@ -114,9 +200,7 @@ export const useSocialFlow = () => {
   const [postQueue, setPostQueue] = useState<any[]>([]);
 
   useEffect(() => {
-    let timerId: NodeJS.Timeout;
-
-    const poll = async () => {
+    const loadQueue = async () => {
       try {
         const remoteQueue = await fetchPostQueue();
         const mappedQueue = remoteQueue.map((q: any) => {
@@ -150,17 +234,27 @@ export const useSocialFlow = () => {
           };
         });
         setPostQueue(mappedQueue);
-
-        // Dynamic interval: 5 seconds if there are active tasks, otherwise slow down to 30 seconds when idle
-        const hasActive = remoteQueue.some((q: any) => q.status === 'pending' || q.status === 'processing');
-        timerId = setTimeout(poll, hasActive ? 5000 : 30000);
       } catch (e) {
-        timerId = setTimeout(poll, 30000); // Fallback to slow poll on error
+        console.error("Erro ao carregar fila de posts:", e);
       }
     };
 
-    poll();
-    return () => clearTimeout(timerId);
+    loadQueue();
+
+    const channel = supabase
+      .channel('post_queue_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'post_queue' },
+        () => {
+          loadQueue();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
 
@@ -617,10 +711,18 @@ export const useSocialFlow = () => {
   const addToQueue = async (isScheduled: boolean) => {
     if (isSubmittingRef.current) return;
     if (manualData.media.length === 0) return alert('Escolha uma imagem ou vídeo.');
-    const activePages = accounts
+    const rawPages = accounts
       .flatMap(acc => (acc.pages || []).map(p => ({ ...p, parentToken: acc.token })))
-      .filter(p => selectedPageIds.has(p.fb_id))
-      .sort(() => Math.random() - 0.5);
+      .filter(p => selectedPageIds.has(p.fb_id));
+
+    // Deduplicate by fb_id to prevent posting to the same page multiple times
+    const uniquePagesMap = new Map<string, typeof rawPages[0]>();
+    for (const p of rawPages) {
+      if (!uniquePagesMap.has(p.fb_id)) {
+        uniquePagesMap.set(p.fb_id, p);
+      }
+    }
+    const activePages = Array.from(uniquePagesMap.values()).sort(() => Math.random() - 0.5);
     if (activePages.length === 0) return alert('Selecione ao menos um conjunto/página.');
 
     const selectedGroup = pageGroups.find(g =>
@@ -634,7 +736,15 @@ export const useSocialFlow = () => {
       addSecurityLog(`UPLOADING: Fazendo upload de ${manualData.media.length} arquivos...`);
       const mediaUrls = [];
       for (const m of manualData.media) {
-        const url = await uploadMediaToStorage(m.file);
+        let fileToUpload = m.file;
+        if (m.file.type.startsWith('image/')) {
+          addSecurityLog(`COMPRESSING: Otimizando imagem ${m.file.name}...`);
+          fileToUpload = await compressImage(m.file);
+        } else if (m.file.type.startsWith('video/')) {
+          addSecurityLog(`HASHING: Alterando assinatura do vídeo ${m.file.name}...`);
+          fileToUpload = await uniqueVideoHash(m.file);
+        }
+        const url = await uploadMediaToStorage(fileToUpload);
         if (url) {
           mediaUrls.push(JSON.stringify({
             url: url,

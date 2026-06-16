@@ -12,11 +12,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
-const COMMENT_CHECK_INTERVAL = () => 15000 + Math.random() * 15000; // 15–30s aleatório
+const COMMENT_CHECK_INTERVAL = () => 300000 + Math.random() * 60000; // 5-6 minutos (backup/fallback)
 
 // Keep track of comments per page per day to protect from SPAM blocks
 const dailyCommentTracker: Record<string, { date: string; count: number }> = {};
-const DAILY_COMMENT_LIMIT = 15; // Max 15 comments per page per day
+const DAILY_COMMENT_LIMIT = 30; // Max 30 comments per page per day
 
 function checkAndIncrementCommentLimit(pageId: string): boolean {
   const today = new Date().toISOString().split('T')[0];
@@ -76,6 +76,16 @@ async function processComments() {
 
 
 
+        // Check daily comment limit to protect the account
+        if (!checkAndIncrementCommentLimit(comment.page_id)) {
+          console.log(`[Comment Robot] Daily limit of ${DAILY_COMMENT_LIMIT} comments reached for page ${comment.page_id}. Rescheduling to tomorrow.`);
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          tomorrow.setHours(8, 0, 0, 0); // Schedule for tomorrow morning at 08:00 BRT
+          await updateScheduledCommentStatus(comment.id, 'pending', 'Daily limit reached, rescheduled to tomorrow.', comment.attempts, tomorrow.toISOString());
+          continue;
+        }
+
         console.log(`[Comment Robot] Attempting to post comment for post ${comment.fb_post_id} (Attempt ${comment.attempts + 1})`);
         
         // Humanized Spintax parsing
@@ -110,8 +120,9 @@ async function processComments() {
           } else if (nextAttempt >= 20) {
             await updateScheduledCommentStatus(comment.id, 'failed', `Max attempts reached: ${errorMsg}`, nextAttempt);
           } else {
-            // Return to pending to try again later
-            await updateScheduledCommentStatus(comment.id, 'pending', errorMsg, nextAttempt);
+            // Return to pending to try again later with a 5-minute backoff delay to avoid loop congestion
+            const backoffTime = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+            await updateScheduledCommentStatus(comment.id, 'pending', errorMsg, nextAttempt, backoffTime);
           }
         }
         // Delay maior entre postagens para evitar bloqueio por SPAM do Facebook
@@ -140,7 +151,7 @@ function checkAndIncrementPageLimit(pageId: string): boolean {
   return true;
 }
 
-const POST_QUEUE_INTERVAL = 10000; // 10 seconds
+const POST_QUEUE_INTERVAL = 300000; // 5 minutos (backup/fallback)
 
 async function processPostQueue() {
   try {
@@ -331,7 +342,7 @@ async function processPostQueue() {
                   
                 for (const c of item.comments) {
                   if (!c.text) continue;
-                  delaySecs += (c.delay || 0);
+                  delaySecs += (c.delay || 0) * 60;
                   
                   // Humanized offset: 15 to 45 seconds randomized offset per page
                   // to distribute comments across pages and mimic human activity.
@@ -475,6 +486,7 @@ async function startServer() {
     // Recovery system: Restore any stuck 'processing' items back to 'pending' on startup
     try {
       console.log("[PostQueue Recovery] Checking for stuck processing queue items...");
+      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
       const { data: recovered, error: recError } = await supabase
         .from('post_queue')
         .update({ 
@@ -482,6 +494,7 @@ async function startServer() {
           logs: ['System reboot/crash recovery initialized. Resetted item to pending.'] 
         })
         .eq('status', 'processing')
+        .lt('created_at', fifteenMinutesAgo)
         .select();
 
       if (recError) {
@@ -494,6 +507,62 @@ async function startServer() {
     } catch (recErr: any) {
       console.error("[PostQueue Recovery] Failed to execute recovery routine:", recErr.message);
     }
+
+    console.log("[Supabase Realtime] Binding database listeners...");
+    
+    supabase
+      .channel('backend_post_queue')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'post_queue' },
+        (payload: any) => {
+          const status = payload.new?.status;
+          if (status === 'pending') {
+            console.log("[Supabase Realtime] Novo post pendente detectado! Acordando processador de fila...");
+            processPostQueue();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'post_queue' },
+        (payload: any) => {
+          const status = payload.new?.status;
+          const oldStatus = payload.old?.status;
+          if (status === 'pending' && oldStatus !== 'pending') {
+            console.log("[Supabase Realtime] Post atualizado para pendente! Acordando processador de fila...");
+            processPostQueue();
+          }
+        }
+      )
+      .subscribe();
+
+    supabase
+      .channel('backend_scheduled_comments')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'scheduled_comments' },
+        (payload: any) => {
+          const status = payload.new?.status;
+          if (status === 'pending') {
+            console.log("[Supabase Realtime] Novo comentário pendente detectado! Acordando robô de comentários...");
+            processComments();
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'scheduled_comments' },
+        (payload: any) => {
+          const status = payload.new?.status;
+          const oldStatus = payload.old?.status;
+          if (status === 'pending' && oldStatus !== 'pending') {
+            console.log("[Supabase Realtime] Comentário atualizado para pendente! Acordando robô de comentários...");
+            processComments();
+          }
+        }
+      )
+      .subscribe();
 
     console.log("[Comment Robot] Starting orchestration...");
     processComments();

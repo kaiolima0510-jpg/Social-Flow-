@@ -358,13 +358,20 @@ export const fetchPendingComments = async () => {
   }
 };
 
-export const updateScheduledCommentStatus = async (id: string, status: 'completed' | 'failed' | 'pending' | 'processing', error_log?: string, attempts?: number) => {
+export const updateScheduledCommentStatus = async (
+  id: string, 
+  status: 'completed' | 'failed' | 'pending' | 'processing', 
+  error_log?: string, 
+  attempts?: number,
+  next_scheduled_time?: string
+) => {
   const updateData: any = { 
     status
   };
   
   if (attempts !== undefined) updateData.attempts = attempts;
   if (error_log !== undefined) updateData.error_message = error_log;
+  if (next_scheduled_time !== undefined) updateData.scheduled_time = next_scheduled_time;
 
   // Se estamos tentando travar como 'processing', fazemos uma checagem atômica
   if (status === 'processing') {
@@ -567,7 +574,7 @@ export const uploadMediaToStorage = async (file: File): Promise<string | null> =
 
     const { data, error } = await supabase.storage
       .from('media')
-      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+      .upload(filePath, file, { cacheControl: '31536000, immutable', upsert: false });
 
     if (error) {
       console.error("Storage upload error:", error);
