@@ -44,97 +44,105 @@ function parseSpintax(text: string): string {
   return text;
 }
 
+let isProcessingComments = false;
+
 async function processComments() {
+  if (isProcessingComments) {
+    console.log("[Comment Robot] Robô de comentários já em execução. Ignorando chamada paralela.");
+    return;
+  }
+  isProcessingComments = true;
   const now = new Date();
   console.log(`[Comment Robot] ${now.toISOString()} - Checking for pending comments...`);
   
   try {
     const pending = await fetchPendingComments();
-    if (pending.length === 0) return;
+    if (pending.length > 0) {
+      console.log(`[Comment Robot] Found ${pending.length} pending comments to process.`);
 
-    console.log(`[Comment Robot] Found ${pending.length} pending comments to process.`);
-
-    for (const comment of pending) {
-      try {
-        const schedTime = new Date(comment.scheduled_time);
-        const diffSeconds = (now.getTime() - schedTime.getTime()) / 1000;
-        
-        // Wait at least 60 seconds after scheduled time to ensure post is stable
-        if (diffSeconds < 60) {
-          console.log(`[Comment Robot] Skipping comment for post ${comment.fb_post_id} - too early (${Math.round(diffSeconds)}s since scheduled)`);
-          continue;
-        }
-
-        // LOCK: Atomic check to avoid duplicates. 
-        // Only proceed if WE were the ones to successfully mark it as 'processing'.
-        const lockAcquired = await updateScheduledCommentStatus(comment.id, 'processing');
-        
-        if (!lockAcquired) {
-          console.log(`[Comment Robot] LOCK FAILED: Comment ${comment.id} already being processed by another instance.`);
-          continue;
-        }
-
-
-
-        // Check daily comment limit to protect the account
-        if (!checkAndIncrementCommentLimit(comment.page_id)) {
-          console.log(`[Comment Robot] Daily limit of ${DAILY_COMMENT_LIMIT} comments reached for page ${comment.page_id}. Rescheduling to tomorrow.`);
-          const tomorrow = new Date();
-          tomorrow.setDate(tomorrow.getDate() + 1);
-          tomorrow.setHours(8, 0, 0, 0); // Schedule for tomorrow morning at 08:00 BRT
-          await updateScheduledCommentStatus(comment.id, 'pending', 'Daily limit reached, rescheduled to tomorrow.', comment.attempts, tomorrow.toISOString());
-          continue;
-        }
-
-        console.log(`[Comment Robot] Attempting to post comment for post ${comment.fb_post_id} (Attempt ${comment.attempts + 1})`);
-        
-        // Humanized Spintax parsing
-        const processedText = parseSpintax(comment.comment_text);
-        let res = await postComment(comment.access_token, comment.fb_post_id, processedText);
-        
-        if (res?.error && !comment.fb_post_id.includes('_')) {
-           const alternativeId = `${comment.page_id}_${comment.fb_post_id}`;
-           console.log(`[Comment Robot] Retrying with alternative ID: ${alternativeId}`);
-           res = await postComment(comment.access_token, alternativeId, processedText);
-        }
-
-        if (res && !res.error) {
-          console.log(`[Comment Robot] SUCCESS: Comment posted for post ${comment.fb_post_id}`);
-          await updateScheduledCommentStatus(comment.id, 'completed');
-        } else {
-          const errorMsg = res?.error?.message || JSON.stringify(res?.error) || "Unknown error";
-          const nextAttempt = (comment.attempts || 0) + 1;
-          console.log(`[Comment Robot] FAIL: ${errorMsg} for post ${comment.fb_post_id}`);
+      for (const comment of pending) {
+        try {
+          const schedTime = new Date(comment.scheduled_time);
+          const diffSeconds = (now.getTime() - schedTime.getTime()) / 1000;
           
-          // Se for erro de SPAM/Rate Limit, esperar 1 hora para a próxima tentativa
-          // Detecta tanto por código numérico (mais confiável) quanto por string de mensagem
-          const errorCode = res?.error?.code;
-          const isRateLimit = [4, 17, 32, 613, 368].includes(errorCode) ||
-            errorMsg.toLowerCase().includes('frequência') ||
-            errorMsg.toLowerCase().includes('spam') ||
-            errorMsg.toLowerCase().includes('limit') ||
-            errorMsg.toLowerCase().includes('rate');
-          if (isRateLimit) {
-            console.log(`[Comment Robot] Rate limit/SPAM detected. Marking comment ${comment.id} as failed permanently to avoid backlog.`);
-            await updateScheduledCommentStatus(comment.id, 'failed', `Rate limit/SPAM block: ${errorMsg}`, nextAttempt);
-          } else if (nextAttempt >= 20) {
-            await updateScheduledCommentStatus(comment.id, 'failed', `Max attempts reached: ${errorMsg}`, nextAttempt);
-          } else {
-            // Return to pending to try again later with a 5-minute backoff delay to avoid loop congestion
-            const backoffTime = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-            await updateScheduledCommentStatus(comment.id, 'pending', errorMsg, nextAttempt, backoffTime);
+          // Wait at least 60 seconds after scheduled time to ensure post is stable
+          if (diffSeconds < 60) {
+            console.log(`[Comment Robot] Skipping comment for post ${comment.fb_post_id} - too early (${Math.round(diffSeconds)}s since scheduled)`);
+            continue;
           }
+
+          // LOCK: Atomic check to avoid duplicates. 
+          // Only proceed if WE were the ones to successfully mark it as 'processing'.
+          const lockAcquired = await updateScheduledCommentStatus(comment.id, 'processing');
+          
+          if (!lockAcquired) {
+            console.log(`[Comment Robot] LOCK FAILED: Comment ${comment.id} already being processed by another instance.`);
+            continue;
+          }
+
+
+
+          // Check daily comment limit to protect the account
+          if (!checkAndIncrementCommentLimit(comment.page_id)) {
+            console.log(`[Comment Robot] Daily limit of ${DAILY_COMMENT_LIMIT} comments reached for page ${comment.page_id}. Rescheduling to tomorrow.`);
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            tomorrow.setHours(8, 0, 0, 0); // Schedule for tomorrow morning at 08:00 BRT
+            await updateScheduledCommentStatus(comment.id, 'pending', 'Daily limit reached, rescheduled to tomorrow.', comment.attempts, tomorrow.toISOString());
+            continue;
+          }
+
+          console.log(`[Comment Robot] Attempting to post comment for post ${comment.fb_post_id} (Attempt ${comment.attempts + 1})`);
+          
+          // Humanized Spintax parsing
+          const processedText = parseSpintax(comment.comment_text);
+          let res = await postComment(comment.access_token, comment.fb_post_id, processedText);
+          
+          if (res?.error && !comment.fb_post_id.includes('_')) {
+             const alternativeId = `${comment.page_id}_${comment.fb_post_id}`;
+             console.log(`[Comment Robot] Retrying with alternative ID: ${alternativeId}`);
+             res = await postComment(comment.access_token, alternativeId, processedText);
+          }
+
+          if (res && !res.error) {
+            console.log(`[Comment Robot] SUCCESS: Comment posted for post ${comment.fb_post_id}`);
+            await updateScheduledCommentStatus(comment.id, 'completed');
+          } else {
+            const errorMsg = res?.error?.message || JSON.stringify(res?.error) || "Unknown error";
+            const nextAttempt = (comment.attempts || 0) + 1;
+            console.log(`[Comment Robot] FAIL: ${errorMsg} for post ${comment.fb_post_id}`);
+            
+            // Se for erro de SPAM/Rate Limit, esperar 1 hora para a próxima tentativa
+            // Detecta tanto por código numérico (mais confiável) quanto por string de mensagem
+            const errorCode = res?.error?.code;
+            const isRateLimit = [4, 17, 32, 613, 368].includes(errorCode) ||
+              errorMsg.toLowerCase().includes('frequência') ||
+              errorMsg.toLowerCase().includes('spam') ||
+              errorMsg.toLowerCase().includes('limit') ||
+              errorMsg.toLowerCase().includes('rate');
+            if (isRateLimit) {
+              console.log(`[Comment Robot] Rate limit/SPAM detected. Marking comment ${comment.id} as failed permanently to avoid backlog.`);
+              await updateScheduledCommentStatus(comment.id, 'failed', `Rate limit/SPAM block: ${errorMsg}`, nextAttempt);
+            } else if (nextAttempt >= 20) {
+              await updateScheduledCommentStatus(comment.id, 'failed', `Max attempts reached: ${errorMsg}`, nextAttempt);
+            } else {
+              // Return to pending to try again later with a 5-minute backoff delay to avoid loop congestion
+              const backoffTime = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+              await updateScheduledCommentStatus(comment.id, 'pending', errorMsg, nextAttempt, backoffTime);
+            }
+          }
+          // Delay maior entre postagens para evitar bloqueio por SPAM do Facebook
+          await new Promise(r => setTimeout(r, 5000 + Math.random() * 10000)); // 5–15s aleatório
+        } catch (e: any) {
+          console.error(`[Comment Robot] CRITICAL ERROR for comment ${comment.id}:`, e.message);
+          await updateScheduledCommentStatus(comment.id, 'failed', e.message, (comment.attempts || 0) + 1);
         }
-        // Delay maior entre postagens para evitar bloqueio por SPAM do Facebook
-        await new Promise(r => setTimeout(r, 5000 + Math.random() * 10000)); // 5–15s aleatório
-      } catch (e: any) {
-        console.error(`[Comment Robot] CRITICAL ERROR for comment ${comment.id}:`, e.message);
-        await updateScheduledCommentStatus(comment.id, 'failed', e.message, (comment.attempts || 0) + 1);
       }
     }
   } catch (err: any) {
     console.error("[Comment Robot] Error in background job:", err.message);
   } finally {
+    isProcessingComments = false;
     setTimeout(processComments, COMMENT_CHECK_INTERVAL());
   }
 }
@@ -153,22 +161,24 @@ function checkAndIncrementPageLimit(pageId: string): boolean {
 
 const POST_QUEUE_INTERVAL = 300000; // 5 minutos (backup/fallback)
 
+let isProcessingQueue = false;
+
 async function processPostQueue() {
+  if (isProcessingQueue) {
+    console.log("[PostQueue Robot] Robô de posts já em execução. Ignorando chamada paralela.");
+    return;
+  }
+  isProcessingQueue = true;
   try {
     const queue = await fetchPostQueue();
     const pendingItems = queue.filter((i: any) => i.status === 'pending');
     
-    if (pendingItems.length === 0) return;
-
-    // Check Posting Window (Allowed only between 5h and 23h BRT / UTC-3)
-    const brHour = parseInt(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo", hour: "2-digit", hour12: false }));
-    if (brHour >= 23 || brHour < 5) {
-      console.log(`[PostQueue Robot] Fora do horário permitido (5h às 23h BRT). Processamento de posts suspenso.`);
-      setTimeout(processPostQueue, POST_QUEUE_INTERVAL);
-      return;
-    }
-
-    for (const item of pendingItems) {
+    if (pendingItems.length > 0) {
+      const brHour = parseInt(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo", hour: "2-digit", hour12: false }));
+      if (brHour >= 23 || brHour < 5) {
+        console.log(`[PostQueue Robot] Fora do horário permitido (5h às 23h BRT). Processamento de posts suspenso.`);
+      } else {
+        for (const item of pendingItems) {
       console.log(`[PostQueue] Starting processing for item: ${item.label} (${item.id})`);
       
       // LOCK: Atomic check to avoid duplicates.
@@ -418,9 +428,12 @@ async function processPostQueue() {
         await updatePostQueueStatus(item.id, { status: 'error', logs });
       }
     }
+    }
+    }
   } catch (err: any) {
     console.error("[PostQueue] Error in processing queue:", err.message);
   } finally {
+    isProcessingQueue = false;
     setTimeout(processPostQueue, POST_QUEUE_INTERVAL);
   }
 }
