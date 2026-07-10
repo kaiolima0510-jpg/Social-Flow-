@@ -17,23 +17,35 @@ jobs:
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
-          # Você pode usar senha (VPS_PASSWORD) ou chave privada (VPS_SSH_KEY). 
-          # Recomendamos a senha para começar se for mais fácil:
           password: ${{ secrets.VPS_PASSWORD }}
           port: 22
           script: |
-            # Tenta encontrar a pasta do projeto nos locais mais comuns da VPS
-            cd /root/Social-Flow* 2>/dev/null || cd /root/*Social* 2>/dev/null || cd /home/ubuntu/Social-Flow* 2>/dev/null || cd /var/www/Social-Flow* 2>/dev/null || true
+            # Encontra a pasta do projeto automaticamente
+            PROJECT_DIR=$(find /root /home /var/www /opt -name "docker-compose.yml" -not -path "*/supabase/*" 2>/dev/null | head -1 | xargs dirname)
+            if [ -z "$PROJECT_DIR" ]; then
+              echo "ERRO: Pasta do projeto não encontrada!"
+              exit 1
+            fi
+            echo "Projeto encontrado em: $PROJECT_DIR"
+            cd "$PROJECT_DIR"
             
             # Puxa o código novo do GitHub
             git pull
             
-            # Recria o arquivo .env com as chaves corretas do banco novo
-            echo "VITE_SUPABASE_URL=https://tlwbivvezpwraekfrxaq.supabase.co" > .env
-            echo "VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRsd2JpdnZlenB3cmFla2ZyeGFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4MjY0MzgsImV4cCI6MjA5ODQwMjQzOH0.D1O_F8tMk1wbvVtaCDgqB3rP4nspaWLLv-NCaUjs2o8" >> .env
-            echo "PORT=3005" >> .env
-            echo "VITE_BACKEND_URL=http://localhost:3005" >> .env
+            # Recria o arquivo .env com as credenciais do banco de dados da VPS
+            cat > .env << 'ENVEOF'
+            VITE_SUPABASE_URL=http://${{ secrets.VPS_HOST }}:8000
+            VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIn0.Iamm3ZjvcIWzPmhdwIUPKu0riYzY6Q-CQUPX-zGpr44
+            PORT=3005
+            VITE_BACKEND_URL=https://socialflow.livros.digital
+            ENVEOF
+            
+            # Remove espaços extras do arquivo .env
+            sed -i 's/^[ \t]*//' .env
             
             # Reconstrói a imagem do Docker com o código novo e reinicia
             docker-compose build
             docker-compose up -d
+            
+            echo "✅ Deploy concluído com sucesso!"
+
