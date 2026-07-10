@@ -34,18 +34,13 @@ jobs:
             
             # Recria o arquivo .env com as credenciais do banco de dados da VPS
             cat > .env << 'ENVEOF'
-            VITE_SUPABASE_URL=http://${{ secrets.VPS_HOST }}:8000
-            VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIn0.Iamm3ZjvcIWzPmhdwIUPKu0riYzY6Q-CQUPX-zGpr44
-            PORT=3005
-            VITE_BACKEND_URL=https://socialflow.livros.digital
-            ENVEOF
-            
-            # Remove espaços extras do arquivo .env
-            sed -i 's/^[ \t]*//' .env
+VITE_SUPABASE_URL=https://socialflow.livros.digital/supabase
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIn0.Iamm3ZjvcIWzPmhdwIUPKu0riYzY6Q-CQUPX-zGpr44
+PORT=3005
+VITE_BACKEND_URL=https://socialflow.livros.digital
+ENVEOF
             
             # Reconstrói a imagem do Docker com o código novo e reinicia
             docker-compose build
             docker-compose up -d
-            
-            echo "✅ Deploy concluído com sucesso!"
-
+            echo "✅ Deploy concluído!"
