@@ -48,7 +48,7 @@ export const parseSpintax = (text: string): string => {
   return parsed;
 };
 
-const compressImage = (file: File, maxWidth = 1920, maxHeight = 1080, quality = 0.85): Promise<File> => {
+const compressImage = (file: File, maxWidth = 1200, maxHeight = 1200, quality = 0.72): Promise<File> => {
   return new Promise((resolve) => {
     if (!file.type.startsWith('image/')) {
       return resolve(file);
@@ -241,6 +241,8 @@ export const useSocialFlow = () => {
 
     loadQueue();
 
+    const fallbackInterval = setInterval(loadQueue, 15000);
+
     const channel = supabase
       .channel('post_queue_realtime')
       .on(
@@ -253,6 +255,7 @@ export const useSocialFlow = () => {
       .subscribe();
 
     return () => {
+      clearInterval(fallbackInterval);
       supabase.removeChannel(channel);
     };
   }, []);
@@ -385,7 +388,31 @@ export const useSocialFlow = () => {
     }
   }, [selectedPageIds.size]);
 
-  useEffect(() => { loadAccounts(); }, []);
+  useEffect(() => { 
+    loadAccounts(); 
+    
+    const channel = supabase
+      .channel('accounts_pages_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'fb_accounts' },
+        () => {
+          loadAccounts();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'fb_pages' },
+        () => {
+          loadAccounts();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const handleMagicFormat = async () => {
     if (!manualData.caption) return;

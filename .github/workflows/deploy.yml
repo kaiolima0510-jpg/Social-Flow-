@@ -1,0 +1,33 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - feature/novas-atualizacoes
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          # Você pode usar senha (VPS_PASSWORD) ou chave privada (VPS_SSH_KEY). 
+          # Recomendamos a senha para começar se for mais fácil:
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          script: |
+            # Mude a linha abaixo para a pasta exata onde o projeto fica na sua VPS
+            cd /caminho/do/projeto/na/vps
+            
+            # Puxa o código novo do GitHub
+            git pull
+            
+            # Reconstrói a imagem do Docker com o código novo e reinicia
+            docker-compose build
+            docker-compose up -d
