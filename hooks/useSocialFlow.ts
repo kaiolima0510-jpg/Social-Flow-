@@ -289,7 +289,6 @@ export const useSocialFlow = () => {
     setIsProcessing(true);
     addSecurityLog("SCAN: Verificando integridade da rede...");
     try {
-      // Execute each promise individually to avoid one failure blocking everything
       let cloudAccounts: any[] = [];
       let groups: any[] = [];
       let robotData: any[] = [];
@@ -325,19 +324,42 @@ export const useSocialFlow = () => {
         return;
       }
 
+      const immediateMetrics = allPages.map(page => ({
+        name: page.name,
+        fans: 0,
+        fb_id: page.fb_id,
+        picture: page.picture || '',
+        reach: 0,
+        engagement: 0,
+        safety_score: 100,
+        status: 'active',
+        health: 'healthy',
+        errorDetails: null,
+        tokens: 0,
+        lastPost: null
+      }));
+
+      const immediatePageIds = allPages.map(p => p.fb_id);
+      setAccounts(cloudAccounts);
+      setRealPageMetrics(immediateMetrics);
+      if (selectedPageIds.size === 0) {
+        setSelectedPageIds(new Set(immediatePageIds));
+      }
+      setIsProcessing(false);
+      addSecurityLog(`STATUS: ${immediateMetrics.length} canais carregados do banco.`);
+
       const targetPageIds = allPages.map(p => p.fb_id);
       let allStats: any = {};
       try {
         allStats = await fetchAllPagesStatsSummary(targetPageIds);
       } catch (e) {}
 
-      addSecurityLog("CORE: Calculando métricas de performance...");
+      addSecurityLog("CORE: Atualizando métricas de performance via Facebook...");
       const metricsPromises = allPages.map(async (page) => {
         try {
           const m = await fetchPageMetrics(page.fb_id, page.access_token || page.parentToken);
           const stats = allStats[page.fb_id] || { successRate: 100, tokens: 0, lastPost: null };
 
-          // Fallback if we can't get metrics but the page exists in our DB
           return {
             metric: { 
               name: page.name, 
@@ -374,13 +396,14 @@ export const useSocialFlow = () => {
         }
       });
 
-      setAccounts(cloudAccounts);
-      setRealPageMetrics(pageMetricsArr);
-      if (selectedPageIds.size === 0) {
-        setSelectedPageIds(new Set(allPageIds));
+      if (pageMetricsArr.length > 0) {
+        setRealPageMetrics(pageMetricsArr);
+        if (selectedPageIds.size === 0) {
+          setSelectedPageIds(new Set(allPageIds));
+        }
+        setStealthStats(prev => ({ ...prev, totalTokens: totalTokensAccumulated }));
+        addSecurityLog(`STATUS: ${pageMetricsArr.length} canais com métricas atualizadas.`);
       }
-      setStealthStats(prev => ({ ...prev, totalTokens: totalTokensAccumulated }));
-      addSecurityLog(`STATUS: ${pageMetricsArr.length} canais ativos e sincronizados.`);
     } catch (err: any) {
       addSecurityLog(`CRITICAL: Erro na orquestração: ${err.message}`);
     } finally { 
