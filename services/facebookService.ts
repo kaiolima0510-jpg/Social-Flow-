@@ -13,6 +13,22 @@ const BROWSER_HEADERS = {
 
 const wait = (ms: number) => new Promise(res => setTimeout(res, ms));
 
+export const fetchWithTimeout = async (url: string, options: any = {}, timeoutMs = 8000) => {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+};
+
 export const cleanToken = (token: string): string => token.replace(/\s/g, '').trim();
 
 /**
@@ -89,11 +105,11 @@ export const createUniqueBinaryHash = async (file: File): Promise<Blob> => {
 
 export const validateTokenAndFetchPages = async (token: string) => {
   try {
-    const meRes = await fetch(`${FB_GRAPH_URL}/me?fields=name,id&access_token=${token}`);
+    const meRes = await fetchWithTimeout(`${FB_GRAPH_URL}/me?fields=name,id&access_token=${token}`);
     const meData = await meRes.json();
     if (meData.error) throw new Error(meData.error.message);
 
-    const debugRes = await fetch(`${FB_GRAPH_URL}/me/permissions?access_token=${token}`);
+    const debugRes = await fetchWithTimeout(`${FB_GRAPH_URL}/me/permissions?access_token=${token}`);
     const debugData = await debugRes.json();
 
     // If /me/permissions returns an error, this is a PAGE token (not user token).
@@ -113,7 +129,7 @@ export const validateTokenAndFetchPages = async (token: string) => {
     // Suporte a paginação para buscar TODAS as páginas da conta (sem limite de 100)
     while (nextUrl) {
       try {
-        const pagesRes = await fetch(nextUrl);
+        const pagesRes = await fetchWithTimeout(nextUrl);
         const pagesData = await pagesRes.json();
         if (pagesData.error) throw new Error(pagesData.error.message);
 
@@ -137,7 +153,7 @@ export const validateTokenAndFetchPages = async (token: string) => {
     // Caso o token seja de uma PÁGINA individual (Fallback)
     if (pages.length === 0) {
       try {
-        const checkPageRes = await fetch(`${FB_GRAPH_URL}/${meData.id}?fields=name,access_token,picture&access_token=${token}`);
+        const checkPageRes = await fetchWithTimeout(`${FB_GRAPH_URL}/${meData.id}?fields=name,access_token,picture&access_token=${token}`);
         const p = await checkPageRes.json();
         
         // Se p.access_token não vier (comum em tokens de página consultando a si mesmos),
@@ -168,14 +184,14 @@ export const validateTokenAndFetchPages = async (token: string) => {
 
 export const fetchPageMetrics = async (pageId: string, token: string) => {
   try {
-    const res = await fetch(`${FB_GRAPH_URL}/${pageId}?fields=fan_count,talking_about_count,name,picture&access_token=${token}`);
+    const res = await fetchWithTimeout(`${FB_GRAPH_URL}/${pageId}?fields=fan_count,talking_about_count,name,picture&access_token=${token}`);
     const data = await res.json();
     if (data.error) {
       console.error(`[fetchPageMetrics] Graph API Error for page ${pageId}:`, data.error.message || data.error);
       return { error: true, errorDetails: data.error.message || JSON.stringify(data.error) };
     }
     try {
-      const insightsRes = await fetch(`${FB_GRAPH_URL}/${pageId}/insights?metric=page_impressions_unique,page_engaged_users&period=day&access_token=${token}`);
+      const insightsRes = await fetchWithTimeout(`${FB_GRAPH_URL}/${pageId}/insights?metric=page_impressions_unique,page_engaged_users&period=day&access_token=${token}`);
       const insightsData = await insightsRes.json();
       const reach = insightsData.data?.find((i: any) => i.name === 'page_impressions_unique')?.values?.[0]?.value || 0;
       const engaged = insightsData.data?.find((i: any) => i.name === 'page_engaged_users')?.values?.[0]?.value || 0;
@@ -243,7 +259,7 @@ export const postToFacebook = async (
     }
   } catch (e) {}
 
-  const maxAttempts = 2;
+  const maxAttempts = 1;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       let responseData: any;
@@ -421,8 +437,27 @@ export const sendMessageToPSID = async (pageId: string, recipientPsid: string, t
     const body = {
       recipient: { id: recipientPsid },
       message: { text },
-      messaging_type: 'MESSAGE_TAG',
-      tag: 'ACCOUNT_UPDATE'
+      messaging_type: 'RESPONSE'
+    };
+    const res = await fetch(`${FB_GRAPH_URL}/${pageId}/messages?access_token=${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    return await res.json();
+  } catch (e: any) { return { error: { message: e.message } }; }
+};
+
+export const sendRichMessageToPSID = async (pageId: string, recipientPsid: string, messagePayload: any, token: string) => {
+  try {
+    const recipient = recipientPsid.includes('_')
+      ? { comment_id: recipientPsid }
+      : { id: recipientPsid };
+
+    const body = {
+      recipient,
+      message: messagePayload,
+      messaging_type: 'RESPONSE'
     };
     const res = await fetch(`${FB_GRAPH_URL}/${pageId}/messages?access_token=${token}`, {
       method: 'POST',

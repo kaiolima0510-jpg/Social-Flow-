@@ -2,8 +2,8 @@
 import { extractMediaUrl } from "./services/mediaHelper";
 import express from "express";
 
-import { fetchPendingComments, updateScheduledCommentStatus, getAutoReplyConfig, supabase, fetchPostQueue, updatePostQueueStatus, scheduleComment, saveAutoReplyConfig } from "./services/supabaseService";
-import { postComment, sendPrivateReply, postToFacebook } from "./services/facebookService";
+import { fetchPendingComments, updateScheduledCommentStatus, getAutoReplyConfig, supabase, fetchPostQueue, updatePostQueueStatus, scheduleComment, saveAutoReplyConfig, getPageAccessToken, fetchPendingFlowExecutions, updateFlowExecution, isCommentProcessed, markCommentAsProcessed, upsertLead, triggerFlowForLead, fetchAllFlows, resumeFlowExecutionOnUserReply } from "./services/supabaseService";
+import { postComment, sendPrivateReply, postToFacebook, sendRichMessageToPSID, fetchRecentPosts, fetchPostComments, fetchLeadProfile } from "./services/facebookService";
 import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
-const COMMENT_CHECK_INTERVAL = () => 300000 + Math.random() * 60000; // 5-6 minutos (backup/fallback)
+const COMMENT_CHECK_INTERVAL = () => 30000 + Math.random() * 10000; // 30-40 segundos (backup/fallback)
 
 // Keep track of comments per page per day to protect from SPAM blocks
 const dailyCommentTracker: Record<string, { date: string; count: number }> = {};
@@ -65,8 +65,8 @@ async function processComments() {
           const schedTime = new Date(comment.scheduled_time);
           const diffSeconds = (now.getTime() - schedTime.getTime()) / 1000;
           
-          // Wait at least 60 seconds after scheduled time to ensure post is stable
-          if (diffSeconds < 60) {
+          // Wait at least 10 seconds after scheduled time to ensure post is stable
+          if (diffSeconds < 10) {
             console.log(`[Comment Robot] Skipping comment for post ${comment.fb_post_id} - too early (${Math.round(diffSeconds)}s since scheduled)`);
             continue;
           }
@@ -148,6 +148,313 @@ async function processComments() {
 }
 
 // ==========================================
+// BACKGROUND FLOW QUEUE PROCESSOR
+// ==========================================
+let isProcessingFlows = false;
+
+async function processFlowExecutions() {
+  if (isProcessingFlows) return;
+  isProcessingFlows = true;
+
+  try {
+    const pendingExecutions = await fetchPendingFlowExecutions();
+    if (pendingExecutions.length > 0) {
+      console.log(`[Flow Worker] Found ${pendingExecutions.length} pending flow executions.`);
+      
+      for (const exec of pendingExecutions) {
+        try {
+          const flow = (exec as any).fb_flows;
+          if (!flow || !flow.is_active || !flow.steps) {
+            await updateFlowExecution(exec.id, { status: 'completed' });
+            continue;
+          }
+
+          const steps = flow.steps;
+          const currentIndex = exec.current_step_index;
+
+          if (currentIndex >= steps.length) {
+            await updateFlowExecution(exec.id, { status: 'completed' });
+            continue;
+          }
+
+          const step = steps[currentIndex];
+          console.log(`[Flow Worker] Executing step ${currentIndex} (type: ${step.type}) of flow "${flow.name}" for lead ${exec.lead_psid}`);
+
+          if (step.type === 'delay') {
+            const delayValue = parseInt(step.delay_value) || 0;
+            const delayUnit = step.delay_unit || 'seconds';
+            let delayMs = delayValue * 1000;
+            if (delayUnit === 'minutes') delayMs = delayValue * 60 * 1000;
+            if (delayUnit === 'hours') delayMs = delayValue * 60 * 60 * 1000;
+
+            const nextTime = new Date(Date.now() + delayMs).toISOString();
+            await updateFlowExecution(exec.id, {
+              current_step_index: currentIndex + 1,
+              next_execution_time: nextTime
+            });
+            console.log(`[Flow Worker] Flow "${flow.name}" delayed by ${delayValue} ${delayUnit}. Next run at ${nextTime}`);
+          } else {
+            const pageToken = await getPageAccessToken(exec.page_id);
+            if (!pageToken) {
+              console.error(`[Flow Worker] No access token found for page ${exec.page_id}`);
+              await updateFlowExecution(exec.id, { 
+                status: 'failed', 
+                error_message: 'Access token not found' 
+              });
+              continue;
+            }
+
+            // Fetch lead's name to replace variables like {{name}}, {{first_name}}
+            let leadName = "Cliente";
+            try {
+              const { data: leadData } = await supabase
+                .from('fb_leads')
+                .select('name')
+                .eq('page_id', exec.page_id)
+                .eq('psid', exec.lead_psid)
+                .limit(1);
+              if (leadData && leadData.length > 0 && leadData[0].name) {
+                leadName = leadData[0].name;
+              }
+            } catch (err) {
+              console.error("[Flow Worker] Error fetching lead name:", err);
+            }
+
+            const formatMessageText = (rawText: string, fullName: string) => {
+              if (!rawText) return "";
+              const firstName = fullName.split(' ')[0] || fullName;
+              return rawText
+                .replace(/\{\{nome\}\}/gi, fullName)
+                .replace(/\{\{name\}\}/gi, fullName)
+                .replace(/\{\{primeiro_nome\}\}/gi, firstName)
+                .replace(/\{\{first_name\}\}/gi, firstName);
+            };
+
+            let messagePayload: any = {};
+            if (step.type === 'text') {
+              if (step.buttons && step.buttons.length > 0) {
+                const formattedButtons = step.buttons.slice(0, 3).map((btn: any) => {
+                  if (btn.type === 'web_url' || btn.url) {
+                    return {
+                      type: 'web_url',
+                      url: btn.url,
+                      title: formatMessageText(btn.title, leadName) || 'Clique aqui'
+                    };
+                  } else {
+                    return {
+                      type: 'postback',
+                      title: formatMessageText(btn.title, leadName) || 'Selecionar',
+                      payload: btn.payload || btn.title
+                    };
+                  }
+                });
+
+                messagePayload = {
+                  attachment: {
+                    type: 'template',
+                    payload: {
+                      template_type: 'button',
+                      text: formatMessageText(step.text, leadName) || '...',
+                      buttons: formattedButtons
+                    }
+                  }
+                };
+              } else {
+                messagePayload = { text: formatMessageText(step.text, leadName) };
+              }
+            } else if (step.type === 'image') {
+              messagePayload = {
+                attachment: {
+                  type: 'image',
+                  payload: { url: step.media_url, is_reusable: true }
+                }
+              };
+            } else if (step.type === 'audio') {
+              messagePayload = {
+                attachment: {
+                  type: 'audio',
+                  payload: { url: step.media_url, is_reusable: true }
+                }
+              };
+            } else if (step.type === 'card') {
+              const elements = (step.cards || []).map((card: any) => ({
+                title: formatMessageText(card.title, leadName) || '...',
+                subtitle: formatMessageText(card.subtitle, leadName) || '',
+                image_url: card.image_url || undefined,
+                buttons: card.button_url ? [
+                  {
+                    type: 'web_url',
+                    url: card.button_url,
+                    title: formatMessageText(card.button_title, leadName) || 'Acessar Link'
+                  }
+                ] : undefined
+              }));
+
+              if (elements.length > 0) {
+                messagePayload = {
+                  attachment: {
+                    type: 'template',
+                    payload: {
+                      template_type: 'generic',
+                      elements
+                    }
+                  }
+                };
+              } else {
+                messagePayload = { text: "[Card Vazio]" };
+              }
+            }
+
+            const recipientToUse = (currentIndex === 0 && (exec as any).comment_id) 
+              ? (exec as any).comment_id 
+              : exec.lead_psid;
+
+            const res = await sendRichMessageToPSID(exec.page_id, recipientToUse, messagePayload, pageToken);
+            if (res.error) {
+              console.error(`[Flow Worker] Facebook API error for lead ${exec.lead_psid}:`, res.error);
+              
+              const is24hError = res.error.code === 10 || 
+                                 res.error.code === 200 || 
+                                 res.error.message?.includes("outside the allowed window") || 
+                                 res.error.message?.includes("fora do espaço de tempo") ||
+                                 res.error.message?.includes("24-hour");
+
+              if (is24hError) {
+                const createdAt = new Date(exec.created_at).getTime();
+                const ageInHours = (Date.now() - createdAt) / (1000 * 60 * 60);
+                
+                if (ageInHours < 24) { // Tenta reprocessar por até 24h
+                  console.log(`[Flow Worker] Janela de 24h fechada para o lead ${exec.lead_psid}. Reagendando tentativa para daqui a 2 minutos.`);
+                  await updateFlowExecution(exec.id, {
+                    next_execution_time: new Date(Date.now() + 2 * 60 * 1000).toISOString(),
+                    error_message: 'Aguardando interação do usuário (Janela de 24h)'
+                  });
+                  continue;
+                }
+              }
+
+              await updateFlowExecution(exec.id, { 
+                status: 'failed', 
+                error_message: res.error.message 
+              });
+            } else {
+              const nextIndex = currentIndex + 1;
+              const updates: any = { current_step_index: nextIndex };
+              if (nextIndex >= steps.length) {
+                updates.status = 'completed';
+              } else {
+                updates.next_execution_time = new Date(Date.now() + 1000).toISOString();
+              }
+              await updateFlowExecution(exec.id, updates);
+            }
+          }
+        } catch (e: any) {
+          console.error(`[Flow Worker] Error processing flow execution ${exec.id}:`, e);
+          await updateFlowExecution(exec.id, { status: 'failed', error_message: e.message });
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[Flow Worker] Critical crash:", e);
+  } finally {
+    isProcessingFlows = false;
+  }
+}
+
+// ==========================================
+// BACKGROUND AUTOMATED COMMENT SYNC (LEADS & FLOWS)
+// ==========================================
+let isSyncingLeadsBackground = false;
+
+async function syncLeadsAndTriggerAutomationsBackground() {
+  if (isSyncingLeadsBackground) return;
+  isSyncingLeadsBackground = true;
+  console.log("[Auto Sync] Starting background comment synchronization for active flows...");
+
+  try {
+    const { data: pages, error } = await supabase
+      .from('fb_pages')
+      .select('fb_id, access_token, name');
+      
+    if (error || !pages) {
+      console.error("[Auto Sync] Error fetching pages:", error);
+      isSyncingLeadsBackground = false;
+      return;
+    }
+
+    const flows = await fetchAllFlows();
+    const { data: automations } = await supabase
+      .from('fb_automations')
+      .select('*')
+      .eq('is_active', true);
+
+    for (const page of pages) {
+      if (!page.access_token) continue;
+      
+      try {
+        console.log(`[Auto Sync] Checking page: ${page.name}`);
+        const posts = await fetchRecentPosts(page.fb_id, page.access_token);
+        
+        for (const post of posts) {
+          const comments = await fetchPostComments(post.id, page.access_token);
+          
+          for (const comment of comments) {
+            if (!comment.from || comment.from.id === page.fb_id) continue;
+            
+            const alreadyProcessed = await isCommentProcessed(comment.id);
+            if (!alreadyProcessed) {
+              const matchingFlow = (flows || []).find(f => 
+                f.is_active && 
+                (f.page_ids?.includes(page.fb_id) || f.page_id === page.fb_id) &&
+                (f.trigger_type === 'all' || (f.trigger_keyword && comment.message.toLowerCase().includes(f.trigger_keyword.toLowerCase())))
+              );
+
+              if (matchingFlow) {
+                console.log(`[Auto Sync] [Flow Match] Page: ${page.name}, Post: ${post.id}, Comment: ${comment.id}, User: ${comment.from.name}`);
+                await triggerFlowForLead(page.fb_id, comment.from.id, matchingFlow.id, comment.id);
+                await markCommentAsProcessed(comment.id, page.fb_id);
+                
+                await upsertLead({
+                  page_id: page.fb_id,
+                  psid: comment.from.id,
+                  name: comment.from.name,
+                  last_interaction: new Date().toISOString()
+                });
+                continue;
+              }
+
+              const matchingAuto = (automations || []).find(a => 
+                a.page_id === page.fb_id &&
+                (!a.trigger_keyword || comment.message.toLowerCase().includes(a.trigger_keyword.toLowerCase()))
+              );
+
+              if (matchingAuto) {
+                console.log(`[Auto Sync] [AutoReply Match] Page: ${page.name}, Post: ${post.id}, Comment: ${comment.id}`);
+                await sendPrivateReply(comment.id, matchingAuto.reply_message, page.access_token);
+                await markCommentAsProcessed(comment.id, page.fb_id);
+                
+                await upsertLead({
+                  page_id: page.fb_id,
+                  psid: comment.from.id,
+                  name: comment.from.name,
+                  last_interaction: new Date().toISOString()
+                });
+              }
+            }
+          }
+        }
+      } catch (pageErr: any) {
+        console.error(`[Auto Sync] Error checking page ${page.name}:`, pageErr.message);
+      }
+    }
+  } catch (err: any) {
+    console.error("[Auto Sync] Critical error in background sync:", err.message);
+  } finally {
+    isSyncingLeadsBackground = false;
+  }
+}
+
+// ==========================================
 // BACKGROUND POST QUEUE PROCESSOR
 // ==========================================
 // Keep track of posts per page per day to respect spam limits
@@ -174,11 +481,7 @@ async function processPostQueue() {
     const pendingItems = queue.filter((i: any) => i.status === 'pending');
     
     if (pendingItems.length > 0) {
-      const brHour = parseInt(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo", hour: "2-digit", hour12: false }));
-      if (brHour >= 23 || brHour < 5) {
-        console.log(`[PostQueue Robot] Fora do horário permitido (5h às 23h BRT). Processamento de posts suspenso.`);
-      } else {
-        for (const item of pendingItems) {
+      for (const item of pendingItems) {
       console.log(`[PostQueue] Starting processing for item: ${item.label} (${item.id})`);
       
       // LOCK: Atomic check to avoid duplicates.
@@ -429,7 +732,6 @@ async function processPostQueue() {
       }
     }
     }
-    }
   } catch (err: any) {
     console.error("[PostQueue] Error in processing queue:", err.message);
   } finally {
@@ -466,8 +768,115 @@ async function startServer() {
 
   // Facebook Webhook Event Receiver
   app.post("/api/webhook/facebook", express.json(), async (req, res) => {
-    console.log("[Webhook] Received event, but webhook features are disabled per user request.");
-    res.status(200).send("EVENT_RECEIVED_BUT_DEACTIVATED");
+    const body = req.body;
+
+    if (body.object === "page") {
+      res.status(200).send("EVENT_RECEIVED");
+
+      for (const entry of body.entry) {
+        // 1. Process Messages (Messenger Webhook)
+        if (entry.messaging) {
+          for (const msgEvent of entry.messaging) {
+            // A message from the lead/user (ignoring echos sent by the page itself)
+            if (msgEvent.message && !msgEvent.message.is_echo) {
+              try {
+                const senderId = msgEvent.sender.id; // PSID of the lead
+                const pageId = msgEvent.recipient.id; // ID of the page
+                const text = msgEvent.message.text || "";
+
+                console.log(`[Webhook] User message received from ${senderId} on page ${pageId}: "${text}"`);
+
+                // Get page access token to fetch lead details
+                const pageToken = await getPageAccessToken(pageId);
+                let name = "Cliente";
+                let profilePic = "";
+                if (pageToken) {
+                  const profile = await fetchLeadProfile(senderId, pageToken);
+                  if (profile && profile.name) {
+                    name = profile.name;
+                    profilePic = profile.profile_pic || "";
+                  }
+                }
+
+                // Update lead last interaction & name
+                await upsertLead({
+                  page_id: pageId,
+                  psid: senderId,
+                  name: name,
+                  profile_pic: profilePic,
+                  last_interaction: new Date().toISOString()
+                });
+
+                // Resume/wake up the flow execution (e.g. if it was waiting for the 24h window)
+                await resumeFlowExecutionOnUserReply(pageId, senderId);
+
+              } catch (err: any) {
+                console.error("[Webhook] Messaging Error:", err.message);
+              }
+            }
+          }
+        }
+
+        // 2. Process Comments (Feed Webhook)
+        if (entry.changes) {
+          for (const event of entry.changes) {
+            if (event.field === "feed" && event.value.item === "comment" && event.value.verb === "add") {
+              try {
+                const commentId = event.value.comment_id;
+                const fullPostId = event.value.post_id;
+                const pageId = entry.id; // Page ID
+                const message = event.value.message || "";
+                const sender = event.value.from; // { id: "PSID", name: "Name" }
+
+                // Ignore comments made by the page itself
+                if (!sender || sender.id === pageId) continue;
+
+                console.log(`[Webhook] New comment from ${sender.name} (${sender.id}) on page ${pageId}: "${message}"`);
+
+                const alreadyProcessed = await isCommentProcessed(commentId);
+                if (alreadyProcessed) {
+                  console.log(`[Webhook] Comment ${commentId} already processed. Skipping.`);
+                  continue;
+                }
+
+                // Fetch active flows and match
+                const flows = await fetchAllFlows();
+                const matchingFlow = (flows || []).find(f => 
+                  f.is_active && 
+                  (f.page_ids?.includes(pageId) || f.page_id === pageId) &&
+                  (f.trigger_type === 'all' || (f.trigger_keyword && message.toLowerCase().includes(f.trigger_keyword.toLowerCase())))
+                );
+
+                if (matchingFlow) {
+                  console.log(`[Webhook] [Flow Match] Page: ${pageId}, Flow: ${matchingFlow.name}, User: ${sender.name}`);
+                  
+                  // Upsert lead details in CRM
+                  await upsertLead({
+                    page_id: pageId,
+                    psid: sender.id,
+                    name: sender.name,
+                    last_interaction: new Date().toISOString()
+                  });
+
+                  // Trigger flow execution
+                  await triggerFlowForLead(pageId, sender.id, matchingFlow.id, commentId);
+                  
+                  // Mark comment as processed
+                  await markCommentAsProcessed(commentId, pageId);
+                } else {
+                  console.log(`[Webhook] No active flow matched comment "${message}" on page ${pageId}`);
+                }
+
+              } catch (err: any) {
+                console.error("[Webhook] Comment Event Error:", err.message);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      res.sendStatus(404);
+    }
   });
 
   // Em dev, o Vite roda separado (porta 3000). O backend serve apenas as APIs (porta 3005).
@@ -581,6 +990,14 @@ async function startServer() {
     processComments();
     console.log("[PostQueue Robot] Starting queue processor...");
     processPostQueue();
+    
+    console.log("[Flow Robot] Starting flow executions worker...");
+    processFlowExecutions();
+    setInterval(processFlowExecutions, 10000);
+
+    console.log("[Auto Sync] Starting background comment detector...");
+    syncLeadsAndTriggerAutomationsBackground();
+    setInterval(syncLeadsAndTriggerAutomationsBackground, 60000);
   });
 
   const shutdown = () => {

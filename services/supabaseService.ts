@@ -4,10 +4,11 @@ import { Lead, Message, PageGroup } from '../types';
 
 // Robust environment variable loading for both Vite and Node
 const getEnv = (name: string) => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[name]) {
-    // @ts-ignore
-    return import.meta.env[name];
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    if (name === 'VITE_SUPABASE_URL') return import.meta.env.VITE_SUPABASE_URL;
+    if (name === 'VITE_SUPABASE_ANON_KEY') return import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (name === 'PORT') return import.meta.env.PORT;
+    if (name === 'VITE_BACKEND_URL') return import.meta.env.VITE_BACKEND_URL;
   }
   if (typeof process !== 'undefined' && process.env && process.env[name]) {
     return process.env[name];
@@ -340,14 +341,14 @@ export const fetchScheduledCommentsSummary = async () => {
 
 export const fetchPendingComments = async () => {
   try {
-    const oneMinuteAgo = new Date(Date.now() - 60000).toISOString();
+    const nowStr = new Date().toISOString();
     const { data, error } = await supabase
       .from('scheduled_comments')
       .select('*')
       .eq('status', 'pending')
-      .lte('scheduled_time', oneMinuteAgo)
+      .lte('scheduled_time', nowStr)
       .order('scheduled_time', { ascending: true })
-      .limit(15);
+      .limit(100);
     if (error) {
       console.error("Error fetching pending comments:", error);
       return [];
@@ -532,6 +533,176 @@ export const deleteAutomation = async (id: string) => {
   if (error) throw error;
 };
 
+export const getPageAccessToken = async (pageId: string): Promise<string | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('fb_pages')
+      .select('access_token')
+      .eq('fb_id', pageId)
+      .maybeSingle();
+      
+    if (error || !data) return null;
+    return data.access_token;
+  } catch (e) {
+    return null;
+  }
+};
+
+// FLOWS
+export const fetchAllFlows = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('fb_flows')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.error("fetchAllFlows Error:", error);
+      return [];
+    }
+    return data || [];
+  } catch (e) {
+    return [];
+  }
+};
+
+export const fetchFlowsByPage = async (pageId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('fb_flows')
+      .select('*')
+      .or(`page_id.eq.${pageId},page_ids.cs.["${pageId}"]`)
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.error("fetchFlowsByPage Error:", error);
+      return [];
+    }
+    return data || [];
+  } catch (e) {
+    return [];
+  }
+};
+
+export const saveFlow = async (flow: any) => {
+  const { data, error } = await supabase
+    .from('fb_flows')
+    .upsert(flow)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+export const deleteFlow = async (id: string) => {
+  const { error } = await supabase.from('fb_flows').delete().eq('id', id);
+  if (error) throw error;
+};
+
+export const triggerFlowForLead = async (pageId: string, psid: string, flowId: string, commentId?: string) => {
+  try {
+    const { data: existing } = await supabase
+      .from('fb_flow_executions')
+      .select('id')
+      .eq('lead_psid', psid)
+      .eq('flow_id', flowId)
+      .eq('status', 'running')
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      return existing[0];
+    }
+
+    const { data, error } = await supabase
+      .from('fb_flow_executions')
+      .insert({
+        page_id: pageId,
+        lead_psid: psid,
+        flow_id: flowId,
+        comment_id: commentId || null,
+        current_step_index: 0,
+        status: 'running',
+        next_execution_time: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.error("triggerFlowForLead Error:", e);
+    return null;
+  }
+};
+
+export const fetchPendingFlowExecutions = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('fb_flow_executions')
+      .select('*, fb_flows(*)')
+      .eq('status', 'running')
+      .lte('next_execution_time', new Date().toISOString());
+
+    if (error) {
+      console.error("fetchPendingFlowExecutions Error:", error);
+      return [];
+    }
+    return data || [];
+  } catch (e) {
+    return [];
+  }
+};
+
+export const updateFlowExecution = async (id: string, updates: any) => {
+  try {
+    const { data, error } = await supabase
+      .from('fb_flow_executions')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.error("updateFlowExecution Error:", e);
+    return null;
+  }
+};
+
+export const resumeFlowExecutionOnUserReply = async (pageId: string, leadPsid: string) => {
+  try {
+    const { data: executions, error } = await supabase
+      .from('fb_flow_executions')
+      .select('id')
+      .eq('page_id', pageId)
+      .eq('lead_psid', leadPsid)
+      .eq('status', 'running');
+
+    if (error) throw error;
+    if (executions && executions.length > 0) {
+      for (const exec of executions) {
+        await supabase
+          .from('fb_flow_executions')
+          .update({
+            next_execution_time: new Date().toISOString(),
+            error_message: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', exec.id);
+        console.log(`[Supabase Service] Wake up/resume flow execution ${exec.id} for lead ${leadPsid}`);
+      }
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error("resumeFlowExecutionOnUserReply Error:", e);
+    return false;
+  }
+};
+
+
 export const isCommentProcessed = async (commentId: string) => {
   try {
     const { data } = await supabase
@@ -604,7 +775,7 @@ export const savePostQueue = async (item: any) => {
       auto_reply_text: item.autoReplyText,
       story_link: item.storyLink,
       is_scheduled: item.isScheduled,
-      scheduled_date: item.scheduledDate,
+      scheduled_date: item.scheduledDate || null,
       use_ai: item.useAI,
       pages: item.pages,
       media_urls: item.mediaUrls,

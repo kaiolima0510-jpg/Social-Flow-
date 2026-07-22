@@ -12,6 +12,14 @@ dist
 dist-ssr
 *.local
 
+# Variáveis de ambiente (NUNCA commitar - contém chaves secretas)
+.env
+.env.local
+.env.production
+
+# Arquivos de deploy gerados
+*.zip
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

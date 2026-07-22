@@ -122,8 +122,8 @@ const EditorTab: React.FC<EditorTabProps> = ({
               </div>
               <div>
                 <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500 mb-1">Destino da Postagem</p>
-                <h3 className="text-xl font-black text-slate-900 dark:text-white tracking-tight">
-                  {selectionLabel || 'Nenhum conjunto selecionado'}
+                <h3 className={`text-xl font-black tracking-tight ${isSelectionEmpty ? 'text-rose-500 dark:text-rose-400 flex items-center gap-2' : 'text-slate-900 dark:text-white'}`}>
+                  {selectionLabel || '⚠️ Nenhum conjunto selecionado'}
                 </h3>
               </div>
             </div>
@@ -417,7 +417,7 @@ const EditorTab: React.FC<EditorTabProps> = ({
               <div className="relative group">
                 <button 
                   onClick={() => handleAction(false)} 
-                  disabled={!canPost} 
+                  disabled={!canPost || isProcessing} 
                   className="w-full h-16 lg:h-20 bg-indigo-600 text-white rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] flex items-center justify-center gap-4 shadow-2xl shadow-indigo-500/40 hover:bg-indigo-700 hover:-translate-y-1 active:scale-[0.98] transition-all duration-300 disabled:opacity-40 disabled:grayscale disabled:translate-y-0"
                 >
                   {isProcessing ? <Loader2 size={24} className="animate-spin" /> : <><Zap size={22}/> Deploy Now</>}
@@ -432,7 +432,7 @@ const EditorTab: React.FC<EditorTabProps> = ({
 
               <button 
                 onClick={() => setIsScheduleModalOpen(true)} 
-                disabled={!canPost} 
+                disabled={!canPost || isProcessing} 
                 className="w-full h-16 lg:h-20 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] flex items-center justify-center gap-4 hover:shadow-2xl transition-all active:scale-[0.98] disabled:opacity-40"
               >
                 <Calendar size={22}/> Schedule

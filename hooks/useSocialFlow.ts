@@ -342,9 +342,6 @@ export const useSocialFlow = () => {
       const immediatePageIds = allPages.map(p => p.fb_id);
       setAccounts(cloudAccounts);
       setRealPageMetrics(immediateMetrics);
-      if (selectedPageIds.size === 0) {
-        setSelectedPageIds(new Set(immediatePageIds));
-      }
       setIsProcessing(false);
       addSecurityLog(`STATUS: ${immediateMetrics.length} canais carregados do banco.`);
 
@@ -508,8 +505,14 @@ export const useSocialFlow = () => {
   };
 
   const handleSelectGroup = (group: PageGroup) => {
-    setSelectedPageIds(new Set(group.page_ids));
-    addSecurityLog(`GROUP: Conjunto '${group.name}' selecionado.`);
+    const isSelected = group.page_ids.length === selectedPageIds.size && group.page_ids.every(id => selectedPageIds.has(id));
+    if (isSelected) {
+      setSelectedPageIds(new Set());
+      addSecurityLog(`GROUP: Seleção do conjunto '${group.name}' desfeita.`);
+    } else {
+      setSelectedPageIds(new Set(group.page_ids));
+      addSecurityLog(`GROUP: Conjunto '${group.name}' selecionado.`);
+    }
   };
 
   const togglePageSelection = (fbId: string) => {
