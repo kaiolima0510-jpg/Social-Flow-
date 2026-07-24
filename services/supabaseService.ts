@@ -125,14 +125,16 @@ export const deleteAccountFromCloud = async (id: string) => {
 
 export const saveFullAccount = async (acc: { name: string, token: string, pages: any[] }) => {
   try {
-    // 1. Busca o primeiro account_id válido que já existe na tabela fb_pages para satisfazer a chave estrangeira (foreign key)
+    // 1. Gera um accountId estável a partir do token (hash simples) ou usa um existente
     const { data: existingPages } = await supabase
       .from('fb_pages')
       .select('account_id')
       .limit(1);
       
-    // Usa o primeiro ID encontrado ou um fallback padrão seguro que já está na tabela de fb_accounts
-    const accountId = existingPages?.[0]?.account_id || 'e4f4c03e-f540-407e-ac94-64b6eb619e67';
+    // Se não há páginas no banco ainda, cria um novo account_id. Senão, reutiliza o existente
+    // para manter todas as páginas do mesmo usuário agrupadas.
+    const accountId = existingPages?.[0]?.account_id || crypto.randomUUID();
+    console.log(`[Supabase] Usando account_id: ${accountId}`);
 
     const pagesToInsert = acc.pages.map(p => ({
       account_id: accountId,
@@ -141,6 +143,11 @@ export const saveFullAccount = async (acc: { name: string, token: string, pages:
       access_token: p.access_token,
       category: p.category || ""
     })).filter(p => !!p.access_token);
+
+    if (pagesToInsert.length === 0) {
+      console.warn('[Supabase] Nenhuma página com access_token válido para salvar.');
+      return;
+    }
 
     for (const page of pagesToInsert) {
       // 2. Verifica se a página com esse fb_id já existe na base
@@ -737,7 +744,7 @@ export const fetchTotalLeadsCount = async (): Promise<number> => {
 // BACKGROUND QUEUE & MEDIA SYSTEM
 // ==========================================
 
-export const uploadMediaToStorage = async (file: File): Promise<string | null> => {
+export const uploadMediaToStorage = async (file: File): Promise<{ url: string | null; error: string | null }> => {
   try {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
@@ -749,17 +756,17 @@ export const uploadMediaToStorage = async (file: File): Promise<string | null> =
 
     if (error) {
       console.error("Storage upload error:", error);
-      return null;
+      return { url: null, error: error.message };
     }
 
     const { data: publicUrlData } = supabase.storage
       .from('media')
       .getPublicUrl(filePath);
 
-    return publicUrlData.publicUrl;
-  } catch (e) {
+    return { url: publicUrlData.publicUrl, error: null };
+  } catch (e: any) {
     console.error("Crash on uploadMediaToStorage:", e);
-    return null;
+    return { url: null, error: e?.message ?? 'Erro desconhecido' };
   }
 };
 
