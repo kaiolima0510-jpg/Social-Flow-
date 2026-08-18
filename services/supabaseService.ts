@@ -665,9 +665,9 @@ export const fetchPendingFlowExecutions = async () => {
   try {
     const { data, error } = await withWs(supabase
       .from('fb_flow_executions')
-      .select('*, fb_flows(*))')
+      .select('*, fb_flows(*)')
       .eq('status', 'running')
-      .lte('next_execution_time', new Date().toISOString());
+      .lte('next_execution_time', new Date().toISOString()));
 
     if (error) {
       console.error("fetchPendingFlowExecutions Error:", error);
