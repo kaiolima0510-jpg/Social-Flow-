@@ -40,7 +40,7 @@ export const fetchGoogleSheetData = async (url: string): Promise<SpreadsheetRow[
           const parts = dataStr.split('/');
           if (parts.length === 3) {
             // Formato YYYY-MM-DDTHH:MM:00
-            finalDate = `${parts[2]}-${parts[1]}-${parts[0]}T${horaStr}:00`;
+            finalDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}T${horaStr}:00`;
           }
         }
 

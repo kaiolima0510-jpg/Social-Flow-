@@ -1,6 +1,12 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
+let _aiClient: any = null;
+const getAiClient = () => {
+  if (!_aiClient) _aiClient = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  return _aiClient;
+};
+
 const spinningCache = new Map<string, { variations: string[], timestamp: number }>();
 const CACHE_TTL = 1000 * 60 * 5;
 
@@ -27,9 +33,9 @@ export const generateBatchVariations = async (
 
   if (urls.length === 0) {
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = getAiClient();
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.0-flash',
         contents: `Gere ${count} variações criativas desta legenda: "${originalText}". 
         IMPORTANTE: Preserve e melhore a formatação, use quebras de linha estratégicas para listas e ingredientes, e adicione emojis pertinentes.
         Retorne estritamente um JSON no formato: {"v": ["var1", "var2"]}`,
@@ -50,9 +56,9 @@ export const generateBatchVariations = async (
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAiClient();
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: `Gere ${count} variações criativas mantendo os placeholders [URL_REF_X]: "${maskedText}".
         IMPORTANTE: Use quebras de linha para organizar o texto, especialmente se for uma receita ou lista. Mantenha os links nos lugares corretos.`,
       config: {
@@ -98,9 +104,9 @@ export const generateBatchVariations = async (
 export const generateAlbumDescriptions = async (text: string, count: number): Promise<string[]> => {
   if (!text || count === 0) return [];
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAiClient();
     const res = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: `Gere ${count} legendas curtas para fotos sobre: ${text}.`,
       config: { 
         responseMimeType: "application/json",
@@ -129,9 +135,9 @@ export const generateAlbumDescriptions = async (text: string, count: number): Pr
 export const formatTextWithAI = async (text: string): Promise<string> => {
   if (!text || text.length < 10) return text;
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = getAiClient();
     const res = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash',
       contents: `Formate este texto para o Facebook, garantindo que listas e receitas tenham quebras de linha claras e emojis pertinentes. 
       Mantenha o conteúdo original, apenas melhore a legibilidade: "${text}"`,
     });

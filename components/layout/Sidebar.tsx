@@ -26,13 +26,19 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const activeQueueCount = postQueue.filter(i => i.status === 'pending' || i.status === 'processing').length;
 
+  const role = typeof window !== 'undefined' ? sessionStorage.getItem('sf_role') : 'user';
+
   const NAV = [
     { tab: Tab.DASHBOARD,      icon: <Activity size={18}/>, label: 'Dashboard' },
     { tab: Tab.EDITOR_STEALTH, icon: <Zap size={18}/>,      label: 'Editor Stealth', badge: activeQueueCount },
     { tab: Tab.LEADS,          icon: <Users size={18}/>,    label: 'Leads' },
     { tab: Tab.GATEWAYS,       icon: <Globe size={18}/>,    label: 'Gateways' },
-    { tab: Tab.SCHEDULED_POSTS, icon: <Zap size={18}/>, label: 'Posts Agendados', badge: activeQueueCount },
+    { tab: Tab.SCHEDULED_POSTS, icon: <Calendar size={18}/>, label: 'Posts Agendados', badge: activeQueueCount },
   ];
+
+  if (role === 'admin') {
+    NAV.push({ tab: Tab.USERS, icon: <ShieldCheck size={18}/>, label: 'Gestão de Usuários' });
+  }
 
   return (
     <>

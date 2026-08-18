@@ -302,7 +302,9 @@ const ScheduledPostsTab: React.FC<{ activeTab: Tab; setActiveTab: (t: Tab) => vo
                              type="datetime-local" 
                              defaultValue={p.scheduled_date ? p.scheduled_date.slice(0, 16) : ""}
                              onChange={(e) => {
-                               p._new_date = e.target.value;
+                               setPosts(prev => prev.map(post => 
+                                 post.id === p.id ? { ...post, _new_date: e.target.value } : post
+                               ));
                              }}
                              className="flex-1 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 text-[10px] text-slate-800 dark:text-white"
                            />

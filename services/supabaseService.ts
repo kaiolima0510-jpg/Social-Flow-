@@ -1,13 +1,27 @@
 
 import { createClient } from '@supabase/supabase-js';
+
+export const getWorkspace = () => {
+  if (typeof window !== 'undefined') {
+    return sessionStorage.getItem('sf_workspace') || 'admin';
+  }
+  return null;
+};
+
+export const withWs = (query: any) => {
+  const ws = getWorkspace();
+  if (ws) return query.eq('workspace', ws);
+  return query;
+};
 import { Lead, Message, PageGroup } from '../types';
 
 // Robust environment variable loading for both Vite and Node
 const getEnv = (name: string) => {
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[name]) {
-    // @ts-ignore
-    return import.meta.env[name];
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+    if (name === 'VITE_SUPABASE_URL') return (import.meta as any).env.VITE_SUPABASE_URL;
+    if (name === 'VITE_SUPABASE_ANON_KEY') return (import.meta as any).env.VITE_SUPABASE_ANON_KEY;
+    if (name === 'PORT') return (import.meta as any).env.PORT;
+    if (name === 'VITE_BACKEND_URL') return (import.meta as any).env.VITE_BACKEND_URL;
   }
   if (typeof process !== 'undefined' && process.env && process.env[name]) {
     return process.env[name];
@@ -32,9 +46,14 @@ export const supabase = createClient(supabaseUrl || '', supabaseKey || '');
 export const fetchAccountsFromCloud = async () => {
   try {
     // Tentamos buscar primeiro em fb_pages, que é onde o usuário confirmou que os dados estão.
-    const { data: pagesData, error: pagesError } = await supabase.from('fb_pages').select('*');
+    const { data: pagesData, error: pagesError } = await withWs(supabase.from('fb_pages').select('*'));
     
-    if (!pagesError && pagesData && pagesData.length > 0) {
+    if (pagesError) {
+      console.error("fetchAccountsFromCloud pagesError:", pagesError);
+      throw new Error(`Erro fb_pages: ${pagesError.message}`);
+    }
+
+    if (pagesData && pagesData.length > 0) {
       // Agrupamos as páginas por account_id para manter a compatibilidade com a UI
       const accountsMap: Record<string, any> = {};
       
@@ -67,10 +86,10 @@ export const fetchAccountsFromCloud = async () => {
       return Object.values(accountsMap);
     }
 
-    const { data, error } = await supabase.from('fb_accounts').select('*');
+    const { data, error } = await withWs(supabase.from('fb_accounts').select('*'));
     if (error) {
-      console.error("fetchAccountsFromCloud Error:", error);
-      return [];
+      console.error("fetchAccountsFromCloud fb_accounts Error:", error);
+      throw new Error(`Erro fb_accounts: ${error.message}`);
     }
     
     return (data || []).map(row => {
@@ -92,9 +111,9 @@ export const fetchAccountsFromCloud = async () => {
         ]
       };
     });
-  } catch (e) {
+  } catch (e: any) {
     console.error("fetchAccountsFromCloud Crash:", e);
-    return [];
+    throw e; // Rethrow to show in the UI logs
   }
 };
 
@@ -124,28 +143,36 @@ export const deleteAccountFromCloud = async (id: string) => {
 
 export const saveFullAccount = async (acc: { name: string, token: string, pages: any[] }) => {
   try {
-    // 1. Busca o primeiro account_id válido que já existe na tabela fb_pages para satisfazer a chave estrangeira (foreign key)
-    const { data: existingPages } = await supabase
+    // 1. Gera um accountId estável a partir do token (hash simples) ou usa um existente
+    const { data: existingPages } = await withWs(supabase
       .from('fb_pages')
-      .select('account_id')
+      .select('account_id'))
       .limit(1);
       
-    // Usa o primeiro ID encontrado ou um fallback padrão seguro que já está na tabela de fb_accounts
-    const accountId = existingPages?.[0]?.account_id || 'e4f4c03e-f540-407e-ac94-64b6eb619e67';
+    // Se não há páginas no banco ainda, cria um novo account_id. Senão, reutiliza o existente
+    // para manter todas as páginas do mesmo usuário agrupadas.
+    const accountId = existingPages?.[0]?.account_id || crypto.randomUUID();
+    console.log(`[Supabase] Usando account_id: ${accountId}`);
 
     const pagesToInsert = acc.pages.map(p => ({
       account_id: accountId,
       fb_id: p.fb_id,
       name: p.name,
       access_token: p.access_token,
-      category: p.category || ""
+      category: p.category || "",
+      workspace: getWorkspace() || 'admin'
     })).filter(p => !!p.access_token);
+
+    if (pagesToInsert.length === 0) {
+      console.warn('[Supabase] Nenhuma página com access_token válido para salvar.');
+      return;
+    }
 
     for (const page of pagesToInsert) {
       // 2. Verifica se a página com esse fb_id já existe na base
-      const { data: existing, error: fetchError } = await supabase
+      const { data: existing, error: fetchError } = await withWs(supabase
         .from('fb_pages')
-        .select('id')
+        .select('id'))
         .eq('fb_id', page.fb_id)
         .maybeSingle();
 
@@ -240,18 +267,18 @@ export const fetchAllPagesStatsSummary = async (pageIds: string[]) => {
 
   try {
     // 1. Fetch all publications for these pages
-    const { data: allPubs, error: pubsError } = await supabase
+    const { data: allPubs, error: pubsError } = await withWs(supabase
       .from('publications')
-      .select('page_id, status, created_at')
+      .select('page_id, status, created_at'))
       .in('page_id', pageIds)
       .order('created_at', { ascending: false });
 
     if (pubsError) console.warn("publications table might be missing or empty:", pubsError.message);
 
     // 2. Fetch latest metrics for these pages
-    const { data: allMetrics, error: metricsError } = await supabase
+    const { data: allMetrics, error: metricsError } = await withWs(supabase
       .from('page_metrics')
-      .select('page_id, fans')
+      .select('page_id, fans'))
       .in('page_id', pageIds)
       .order('created_at', { ascending: false });
 
@@ -282,7 +309,7 @@ export const fetchAllPagesStatsSummary = async (pageIds: string[]) => {
 
 export const fetchPageGroups = async (): Promise<PageGroup[]> => {
   try {
-    const { data, error } = await supabase.from('page_groups').select('*');
+    const { data, error } = await withWs(supabase.from('page_groups').select('*'));
     if (error) {
       console.error("fetchPageGroups Error:", error);
       return [];
@@ -318,15 +345,16 @@ export const scheduleComment = async (comment: any) => {
     fb_post_id: comment.fb_post_id,
     comment_text: comment.comment_text,
     scheduled_time: comment.scheduled_time,
-    status: 'pending'
+    status: 'pending',
+    workspace: comment.workspace || 'admin'
   });
 };
 
 export const fetchScheduledCommentsSummary = async () => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await withWs(supabase
       .from('scheduled_comments')
-      .select('*')
+      .select('*'))
       .order('scheduled_time', { ascending: true });
     if (error) {
       console.error("fetchScheduledCommentsSummary Error:", error);
@@ -340,14 +368,14 @@ export const fetchScheduledCommentsSummary = async () => {
 
 export const fetchPendingComments = async () => {
   try {
-    const oneMinuteAgo = new Date(Date.now() - 60000).toISOString();
-    const { data, error } = await supabase
+    const nowStr = new Date().toISOString();
+    const { data, error } = await withWs(supabase
       .from('scheduled_comments')
-      .select('*')
+      .select('*'))
       .eq('status', 'pending')
-      .lte('scheduled_time', oneMinuteAgo)
+      .lte('scheduled_time', nowStr)
       .order('scheduled_time', { ascending: true })
-      .limit(15);
+      .limit(100);
     if (error) {
       console.error("Error fetching pending comments:", error);
       return [];
@@ -398,14 +426,15 @@ export const updateScheduledCommentStatus = async (
   return !error;
 };
 
-export const saveAutoReplyConfig = async (pageId: string, fbPostId: string, replyText: string, token: string) => {
+export const saveAutoReplyConfig = async (pageId: string, fbPostId: string, replyText: string, token: string, workspace: string = 'admin') => {
   const { error } = await supabase
     .from('post_auto_replies')
     .insert({
       page_id: pageId,
       fb_post_id: fbPostId,
       reply_text: replyText,
-      access_token: token
+      access_token: token,
+      workspace
     });
   if (error) {
     console.error("Erro ao salvar config de auto-reply:", error);
@@ -414,9 +443,9 @@ export const saveAutoReplyConfig = async (pageId: string, fbPostId: string, repl
 
 export const getAutoReplyConfig = async (fbPostId: string, pageId?: string) => {
   // 1. Try exact match with fbPostId
-  const { data, error } = await supabase
+  const { data, error } = await withWs(supabase
     .from('post_auto_replies')
-    .select('*')
+    .select('*'))
     .eq('fb_post_id', fbPostId)
     .single();
   
@@ -426,9 +455,9 @@ export const getAutoReplyConfig = async (fbPostId: string, pageId?: string) => {
 
   // 2. If not found and we have a pageId, try fallback by page_id
   if (pageId) {
-    const { data: pageConfigs } = await supabase
+    const { data: pageConfigs } = await withWs(supabase
       .from('post_auto_replies')
-      .select('*')
+      .select('*'))
       .eq('page_id', pageId)
       .limit(1);
     
@@ -459,9 +488,9 @@ export const upsertLead = async (lead: Partial<Lead>) => {
 
 export const fetchLeadsByPage = async (pageId: string): Promise<Lead[]> => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await withWs(supabase
       .from('fb_leads')
-      .select('*')
+      .select('*'))
       .eq('page_id', pageId)
       .order('last_interaction', { ascending: false });
     if (error) {
@@ -485,9 +514,9 @@ export const saveMessageLog = async (msg: Partial<Message>) => {
 
 export const fetchMessagesByLead = async (leadId: string): Promise<Message[]> => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await withWs(supabase
       .from('fb_messages')
-      .select('*')
+      .select('*'))
       .eq('lead_id', leadId)
       .order('created_at', { ascending: true });
     if (error) {
@@ -503,9 +532,9 @@ export const fetchMessagesByLead = async (leadId: string): Promise<Message[]> =>
 // AUTOMATIONS
 export const fetchAutomationsByPage = async (pageId: string) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await withWs(supabase
       .from('fb_automations')
-      .select('*')
+      .select('*'))
       .eq('page_id', pageId);
     if (error) {
       console.error("fetchAutomationsByPage Error:", error);
@@ -532,11 +561,181 @@ export const deleteAutomation = async (id: string) => {
   if (error) throw error;
 };
 
+export const getPageAccessToken = async (pageId: string): Promise<string | null> => {
+  try {
+    const { data, error } = await withWs(supabase
+      .from('fb_pages')
+      .select('access_token'))
+      .eq('fb_id', pageId)
+      .maybeSingle();
+      
+    if (error || !data) return null;
+    return data.access_token;
+  } catch (e) {
+    return null;
+  }
+};
+
+// FLOWS
+export const fetchAllFlows = async () => {
+  try {
+    const { data, error } = await withWs(supabase
+      .from('fb_flows')
+      .select('*'))
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.error("fetchAllFlows Error:", error);
+      return [];
+    }
+    return data || [];
+  } catch (e) {
+    return [];
+  }
+};
+
+export const fetchFlowsByPage = async (pageId: string) => {
+  try {
+    const { data, error } = await withWs(supabase
+      .from('fb_flows')
+      .select('*'))
+      .or(`page_id.eq.${pageId},page_ids.cs.["${pageId}"]`)
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.error("fetchFlowsByPage Error:", error);
+      return [];
+    }
+    return data || [];
+  } catch (e) {
+    return [];
+  }
+};
+
+export const saveFlow = async (flow: any) => {
+  const { data, error } = await supabase
+    .from('fb_flows')
+    .upsert(flow)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+export const deleteFlow = async (id: string) => {
+  const { error } = await supabase.from('fb_flows').delete().eq('id', id);
+  if (error) throw error;
+};
+
+export const triggerFlowForLead = async (pageId: string, psid: string, flowId: string, commentId?: string) => {
+  try {
+    const { data: existing } = await withWs(supabase
+      .from('fb_flow_executions')
+      .select('id'))
+      .eq('lead_psid', psid)
+      .eq('flow_id', flowId)
+      .eq('status', 'running')
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      return existing[0];
+    }
+
+    const { data, error } = await supabase
+      .from('fb_flow_executions')
+      .insert({
+        page_id: pageId,
+        lead_psid: psid,
+        flow_id: flowId,
+        comment_id: commentId || null,
+        current_step_index: 0,
+        status: 'running',
+        next_execution_time: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.error("triggerFlowForLead Error:", e);
+    return null;
+  }
+};
+
+export const fetchPendingFlowExecutions = async () => {
+  try {
+    const { data, error } = await withWs(supabase
+      .from('fb_flow_executions')
+      .select('*, fb_flows(*)')
+      .eq('status', 'running')
+      .lte('next_execution_time', new Date().toISOString()));
+
+    if (error) {
+      console.error("fetchPendingFlowExecutions Error:", error);
+      return [];
+    }
+    return data || [];
+  } catch (e) {
+    return [];
+  }
+};
+
+export const updateFlowExecution = async (id: string, updates: any) => {
+  try {
+    const { data, error } = await supabase
+      .from('fb_flow_executions')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.error("updateFlowExecution Error:", e);
+    return null;
+  }
+};
+
+export const resumeFlowExecutionOnUserReply = async (pageId: string, leadPsid: string) => {
+  try {
+    const { data: executions, error } = await withWs(supabase
+      .from('fb_flow_executions')
+      .select('id'))
+      .eq('page_id', pageId)
+      .eq('lead_psid', leadPsid)
+      .eq('status', 'running');
+
+    if (error) throw error;
+    if (executions && executions.length > 0) {
+      for (const exec of executions) {
+        await supabase
+          .from('fb_flow_executions')
+          .update({
+            next_execution_time: new Date().toISOString(),
+            error_message: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', exec.id);
+        console.log(`[Supabase Service] Wake up/resume flow execution ${exec.id} for lead ${leadPsid}`);
+      }
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error("resumeFlowExecutionOnUserReply Error:", e);
+    return false;
+  }
+};
+
+
 export const isCommentProcessed = async (commentId: string) => {
   try {
-    const { data } = await supabase
+    const { data } = await withWs(supabase
       .from('fb_processed_comments')
-      .select('comment_id')
+      .select('comment_id'))
       .eq('comment_id', commentId);
     return data && data.length > 0;
   } catch (e) {
@@ -550,9 +749,9 @@ export const markCommentAsProcessed = async (commentId: string, pageId: string) 
 
 export const fetchTotalLeadsCount = async (): Promise<number> => {
   try {
-    const { count, error } = await supabase
+    const { count, error } = await withWs(supabase
       .from('fb_leads')
-      .select('*', { count: 'exact', head: true });
+      .select('*', { count: 'exact', head: true }));
     
     if (error) throw error;
     return count || 0;
@@ -566,7 +765,7 @@ export const fetchTotalLeadsCount = async (): Promise<number> => {
 // BACKGROUND QUEUE & MEDIA SYSTEM
 // ==========================================
 
-export const uploadMediaToStorage = async (file: File): Promise<string | null> => {
+export const uploadMediaToStorage = async (file: File): Promise<{ url: string | null; error: string | null }> => {
   try {
     const fileExt = file.name.split('.').pop();
     const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
@@ -578,17 +777,17 @@ export const uploadMediaToStorage = async (file: File): Promise<string | null> =
 
     if (error) {
       console.error("Storage upload error:", error);
-      return null;
+      return { url: null, error: error.message };
     }
 
     const { data: publicUrlData } = supabase.storage
       .from('media')
       .getPublicUrl(filePath);
 
-    return publicUrlData.publicUrl;
-  } catch (e) {
+    return { url: publicUrlData.publicUrl, error: null };
+  } catch (e: any) {
     console.error("Crash on uploadMediaToStorage:", e);
-    return null;
+    return { url: null, error: e?.message ?? 'Erro desconhecido' };
   }
 };
 
@@ -604,7 +803,7 @@ export const savePostQueue = async (item: any) => {
       auto_reply_text: item.autoReplyText,
       story_link: item.storyLink,
       is_scheduled: item.isScheduled,
-      scheduled_date: item.scheduledDate,
+      scheduled_date: item.scheduledDate || null,
       use_ai: item.useAI,
       pages: item.pages,
       media_urls: item.mediaUrls,
@@ -623,9 +822,9 @@ export const savePostQueue = async (item: any) => {
 };
 
 export const fetchPostQueue = async () => {
-  const { data, error } = await supabase
+  const { data, error } = await withWs(supabase
     .from('post_queue')
-    .select('*')
+    .select('*'))
     .order('created_at', { ascending: true });
 
   if (error) {

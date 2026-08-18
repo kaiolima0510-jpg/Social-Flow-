@@ -1,0 +1,13 @@
+# Caddy lê o domínio da variável de ambiente DOMAIN definida no .env
+{$DOMAIN} {
+    # Proxy para o Supabase Kong (API Gateway)
+    handle /supabase/* {
+        uri strip_prefix /supabase
+        reverse_proxy kong:8000
+    }
+
+    # Proxy para a aplicação Social Flow
+    handle {
+        reverse_proxy app:3000
+    }
+}

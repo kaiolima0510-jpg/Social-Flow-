@@ -1,0 +1,46 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - feature/novas-atualizacoes
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          script: |
+            # Encontra a pasta do projeto automaticamente
+            PROJECT_DIR=$(find /root /home /var/www /opt -name "docker-compose.yml" -not -path "*/supabase/*" 2>/dev/null | head -1 | xargs dirname)
+            if [ -z "$PROJECT_DIR" ]; then
+              echo "ERRO: Pasta do projeto não encontrada!"
+              exit 1
+            fi
+            echo "Projeto encontrado em: $PROJECT_DIR"
+            cd "$PROJECT_DIR"
+            
+            # Puxa o código novo do GitHub
+            git pull
+            
+            # Recria o arquivo .env com as credenciais do banco de dados da VPS
+            cat > .env << 'ENVEOF'
+VITE_SUPABASE_URL=https://socialflow.livros.digital/supabase
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIn0.Iamm3ZjvcIWzPmhdwIUPKu0riYzY6Q-CQUPX-zGpr44
+PORT=3005
+VITE_BACKEND_URL=https://socialflow.livros.digital
+ENVEOF
+            
+            # Reconstrói a imagem do Docker com o código novo e reinicia
+            docker-compose build
+            docker-compose up -d
+            echo "✅ Deploy concluído!"

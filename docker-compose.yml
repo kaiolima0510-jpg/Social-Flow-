@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: socialflow_app
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    networks:
+      - socialflow_net
+    volumes:
+      - media_uploads:/app/dist/post_media # Para persistência de mídias locais se necessário
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: socialflow_caddy
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+      - "8080:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - socialflow_net
+    depends_on:
+      - app
+
+volumes:
+  media_uploads:
+  caddy_data:
+  caddy_config:
+
+networks:
+  socialflow_net:
+    external: true

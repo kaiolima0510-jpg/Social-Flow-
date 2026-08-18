@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { RefreshCw, Loader2, Sun, Moon, Menu, Bell, Zap, Search } from 'lucide-react';
+import { RefreshCw, Loader2, Sun, Moon, Menu, Bell, Zap, Search, LogOut, User } from 'lucide-react';
 import { Tab } from '../../types';
 
 interface HeaderProps {
@@ -20,11 +20,27 @@ const tabLabels: Record<Tab, string> = {
   [Tab.SEGURANCA]: 'Security Command Center',
   [Tab.LEADS]: 'Leads Hub',
   [Tab.SCHEDULED_POSTS]: 'Queue & Scheduler',
+  [Tab.USERS]: 'Gestão de Usuários',
 };
 
 const Header: React.FC<HeaderProps> = ({ 
-  activeTab, isProcessing, progress, onRefresh, isDarkMode, toggleDarkMode, onMenuClick 
+  activeTab, 
+  isProcessing, 
+  progress, 
+  onRefresh, 
+  isDarkMode, 
+  toggleDarkMode,
+  onMenuClick
 }) => {
+  const currentTabLabel = tabLabels[activeTab] || 'Dashboard';
+  const workspace = sessionStorage.getItem('sf_workspace') || 'admin';
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('sf_session_token');
+    sessionStorage.removeItem('sf_workspace');
+    window.location.reload();
+  };
+
   return (
     <header className="h-16 lg:h-20 bg-white/80 dark:bg-[#0d1117]/80 backdrop-blur-xl border-b border-slate-100 dark:border-slate-800/50 px-4 lg:px-10 flex items-center justify-between sticky top-0 z-40 transition-all duration-300">
       
@@ -93,6 +109,21 @@ const Header: React.FC<HeaderProps> = ({
                 <span className="absolute top-2.5 right-2.5 w-2.5 h-2.5 bg-rose-500 border-2 border-white dark:border-[#0d1117] rounded-full"></span>
              </button>
           </div>
+
+          <div className="w-px h-6 bg-slate-200 dark:bg-slate-700 mx-1"></div>
+
+          <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-2xl border border-indigo-100 dark:border-indigo-500/20">
+             <User size={16} />
+             <span className="text-[10px] font-bold uppercase tracking-wider">{workspace === 'admin' ? 'Admin' : 'Amiga'}</span>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="p-3 bg-slate-50 dark:bg-white/5 text-slate-500 dark:text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/20 rounded-2xl transition-all ml-1"
+            title="Sair"
+          >
+            <LogOut size={18} />
+          </button>
         </div>
       </div>
     </header>

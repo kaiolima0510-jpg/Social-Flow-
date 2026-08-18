@@ -48,7 +48,7 @@ export const parseSpintax = (text: string): string => {
   return parsed;
 };
 
-const compressImage = (file: File, maxWidth = 1920, maxHeight = 1080, quality = 0.85): Promise<File> => {
+const compressImage = (file: File, maxWidth = 1200, maxHeight = 1200, quality = 0.72): Promise<File> => {
   return new Promise((resolve) => {
     if (!file.type.startsWith('image/')) {
       return resolve(file);
@@ -241,6 +241,8 @@ export const useSocialFlow = () => {
 
     loadQueue();
 
+    const fallbackInterval = setInterval(loadQueue, 15000);
+
     const channel = supabase
       .channel('post_queue_realtime')
       .on(
@@ -253,6 +255,7 @@ export const useSocialFlow = () => {
       .subscribe();
 
     return () => {
+      clearInterval(fallbackInterval);
       supabase.removeChannel(channel);
     };
   }, []);
@@ -286,7 +289,6 @@ export const useSocialFlow = () => {
     setIsProcessing(true);
     addSecurityLog("SCAN: Verificando integridade da rede...");
     try {
-      // Execute each promise individually to avoid one failure blocking everything
       let cloudAccounts: any[] = [];
       let groups: any[] = [];
       let robotData: any[] = [];
@@ -322,19 +324,39 @@ export const useSocialFlow = () => {
         return;
       }
 
+      const immediateMetrics = allPages.map(page => ({
+        name: page.name,
+        fans: 0,
+        fb_id: page.fb_id,
+        picture: page.picture || '',
+        reach: 0,
+        engagement: 0,
+        safety_score: 100,
+        status: 'active',
+        health: 'healthy',
+        errorDetails: null,
+        tokens: 0,
+        lastPost: null
+      }));
+
+      const immediatePageIds = allPages.map(p => p.fb_id);
+      setAccounts(cloudAccounts);
+      setRealPageMetrics(immediateMetrics);
+      setIsProcessing(false);
+      addSecurityLog(`STATUS: ${immediateMetrics.length} canais carregados do banco.`);
+
       const targetPageIds = allPages.map(p => p.fb_id);
       let allStats: any = {};
       try {
         allStats = await fetchAllPagesStatsSummary(targetPageIds);
       } catch (e) {}
 
-      addSecurityLog("CORE: Calculando métricas de performance...");
+      addSecurityLog("CORE: Atualizando métricas de performance via Facebook...");
       const metricsPromises = allPages.map(async (page) => {
         try {
           const m = await fetchPageMetrics(page.fb_id, page.access_token || page.parentToken);
           const stats = allStats[page.fb_id] || { successRate: 100, tokens: 0, lastPost: null };
 
-          // Fallback if we can't get metrics but the page exists in our DB
           return {
             metric: { 
               name: page.name, 
@@ -371,13 +393,14 @@ export const useSocialFlow = () => {
         }
       });
 
-      setAccounts(cloudAccounts);
-      setRealPageMetrics(pageMetricsArr);
-      if (selectedPageIds.size === 0) {
-        setSelectedPageIds(new Set(allPageIds));
+      if (pageMetricsArr.length > 0) {
+        setRealPageMetrics(pageMetricsArr);
+        if (selectedPageIds.size === 0) {
+          setSelectedPageIds(new Set(allPageIds));
+        }
+        setStealthStats(prev => ({ ...prev, totalTokens: totalTokensAccumulated }));
+        addSecurityLog(`STATUS: ${pageMetricsArr.length} canais com métricas atualizadas.`);
       }
-      setStealthStats(prev => ({ ...prev, totalTokens: totalTokensAccumulated }));
-      addSecurityLog(`STATUS: ${pageMetricsArr.length} canais ativos e sincronizados.`);
     } catch (err: any) {
       addSecurityLog(`CRITICAL: Erro na orquestração: ${err.message}`);
     } finally { 
@@ -385,7 +408,31 @@ export const useSocialFlow = () => {
     }
   }, [selectedPageIds.size]);
 
-  useEffect(() => { loadAccounts(); }, []);
+  useEffect(() => { 
+    loadAccounts(); 
+    
+    const channel = supabase
+      .channel('accounts_pages_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'fb_accounts' },
+        () => {
+          loadAccounts();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'fb_pages' },
+        () => {
+          loadAccounts();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const handleMagicFormat = async () => {
     if (!manualData.caption) return;
@@ -427,11 +474,16 @@ export const useSocialFlow = () => {
             type: 'IMAGE' as const,
             description: ""
           };
-          setManualData(prev => ({ 
-            ...prev, 
-            media: prev.type === 'ALBUM' ? [...prev.media, newMedia] : [newMedia],
-            type: prev.type === 'VIDEO' ? 'SINGLE' : prev.type
-          }));
+          setManualData(prev => {
+            if (prev.type !== 'ALBUM') {
+              prev.media.forEach(m => URL.revokeObjectURL(m.preview));
+            }
+            return { 
+              ...prev, 
+              media: prev.type === 'ALBUM' ? [...prev.media, newMedia] : [newMedia],
+              type: prev.type === 'VIDEO' ? 'SINGLE' : prev.type
+            };
+          });
           addSecurityLog("MEDIA: Imagem colada da área de transferência.");
         }
       }
@@ -458,8 +510,14 @@ export const useSocialFlow = () => {
   };
 
   const handleSelectGroup = (group: PageGroup) => {
-    setSelectedPageIds(new Set(group.page_ids));
-    addSecurityLog(`GROUP: Conjunto '${group.name}' selecionado.`);
+    const isSelected = group.page_ids.length === selectedPageIds.size && group.page_ids.every(id => selectedPageIds.has(id));
+    if (isSelected) {
+      setSelectedPageIds(new Set());
+      addSecurityLog(`GROUP: Seleção do conjunto '${group.name}' desfeita.`);
+    } else {
+      setSelectedPageIds(new Set(group.page_ids));
+      addSecurityLog(`GROUP: Conjunto '${group.name}' selecionado.`);
+    }
   };
 
   const togglePageSelection = (fbId: string) => {
@@ -744,17 +802,20 @@ export const useSocialFlow = () => {
           addSecurityLog(`HASHING: Alterando assinatura do vídeo ${m.file.name}...`);
           fileToUpload = await uniqueVideoHash(m.file);
         }
-        const url = await uploadMediaToStorage(fileToUpload);
+        const { url, error: uploadError } = await uploadMediaToStorage(fileToUpload);
         if (url) {
           mediaUrls.push(JSON.stringify({
             url: url,
             description: m.description || ""
           }));
+        } else {
+          addSecurityLog(`FAIL: Falha no upload de "${m.file.name}". Motivo: ${uploadError ?? 'desconhecido'}`);
+          break;
         }
       }
       
       if (mediaUrls.length !== manualData.media.length) {
-         addSecurityLog(`FAIL: Falha no upload de mídia. Tente novamente.`);
+         addSecurityLog(`FAIL: Abortando — não foi possível subir todas as mídias.`);
          return;
       }
 
@@ -764,7 +825,7 @@ export const useSocialFlow = () => {
          type: manualData.type,
          caption: manualData.caption,
          comments: manualData.comments.map(c => ({
-           text: c.useSpintax ? `${spintaxTemplates} ${c.text}` : c.text,
+           text: c.useSpintax ? `${parseSpintax(spintaxTemplates)} ${c.text}` : c.text,
            delay: c.delay
          })),
          autoReplyText: manualData.autoReplyText,

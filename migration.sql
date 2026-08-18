@@ -1,0 +1,15 @@
+ALTER TABLE fb_accounts ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE fb_pages ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE post_history ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE publications ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE page_metrics ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE page_groups ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE scheduled_comments ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE post_auto_replies ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE fb_leads ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE fb_messages ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE fb_automations ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE fb_flows ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE fb_flow_executions ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE fb_processed_comments ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
+ALTER TABLE post_queue ADD COLUMN IF NOT EXISTS workspace TEXT DEFAULT 'admin';
