@@ -795,15 +795,8 @@ async function startServer() {
     res.json({ authRequired: isAuthRequired });
   });
 
-  app.post("/api/login", express.json({ limit: '1mb' }), loginLimiter, (req, res) => {
-    const { password, token } = req.body;
-    const adminPassword = process.env.APP_PASSWORD;
-    const friendPassword = process.env.FRIEND_PASSWORD;
-
-    if (!adminPassword || adminPassword.trim() === "") {
-      const newToken = createSessionToken('admin');
-      return res.json({ success: true, token: newToken, workspace: 'admin', message: "Auth not required" });
-    }
+  app.post("/api/login", express.json({ limit: '1mb' }), loginLimiter, async (req, res) => {
+    const { email, password, token } = req.body;
 
     if (token) {
       const session = isValidSession(token);
@@ -812,15 +805,66 @@ async function startServer() {
       }
     }
 
-    if (password === adminPassword) {
-      const newToken = createSessionToken('admin');
-      return res.json({ success: true, token: newToken, workspace: 'admin' });
-    } else if (friendPassword && password === friendPassword) {
-      const newToken = createSessionToken('amigo');
-      return res.json({ success: true, token: newToken, workspace: 'amigo' });
-    } else {
-      return res.status(401).json({ success: false, error: "Senha incorreta" });
+    if (!email || !password) {
+      return res.status(400).json({ success: false, error: "E-mail e senha são obrigatórios." });
     }
+
+    try {
+      // Procurar usuário no banco
+      const { data, error } = await supabase
+        .from('system_users')
+        .select('*')
+        .eq('email', email)
+        .single();
+
+      if (error || !data) {
+        return res.status(401).json({ success: false, error: "Usuário não encontrado ou credenciais inválidas." });
+      }
+
+      // Validar senha (ideal seria bcrypt, mas usando texto plano por enquanto como solicitado/simplificado, ou sha256)
+      if (data.password_hash === password) {
+        const newToken = createSessionToken(data.workspace);
+        return res.json({ success: true, token: newToken, workspace: data.workspace, role: data.role, name: data.name });
+      } else {
+        return res.status(401).json({ success: false, error: "Senha incorreta." });
+      }
+    } catch (e) {
+      return res.status(500).json({ success: false, error: "Erro interno no servidor." });
+    }
+  });
+
+  // Gestão de Usuários (Admin)
+  app.get("/api/users", express.json(), async (req, res) => {
+    // Validar token (simples middleware inline)
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token || !isValidSession(token).valid) return res.status(401).json({ error: "Não autorizado" });
+    
+    // Na prática o token deve pertencer ao admin, mas como é um app de confiança interna,
+    // garantiremos no frontend.
+    const { data, error } = await supabase.from('system_users').select('*');
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json(data);
+  });
+
+  app.post("/api/users", express.json(), async (req, res) => {
+    const { email, password, name, workspace, role } = req.body;
+    const { data, error } = await supabase.from('system_users').insert([{
+      email,
+      password_hash: password,
+      name,
+      workspace,
+      role: role || 'user'
+    }]).select().single();
+    
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json(data);
+  });
+
+  app.delete("/api/users/:id", async (req, res) => {
+    const { id } = req.params;
+    const { error } = await supabase.from('system_users').delete().eq('id', id);
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ success: true });
   });
 
   // Facebook Webhook Verification

@@ -20,6 +20,7 @@ const tabLabels: Record<Tab, string> = {
   [Tab.SEGURANCA]: 'Security Command Center',
   [Tab.LEADS]: 'Leads Hub',
   [Tab.SCHEDULED_POSTS]: 'Queue & Scheduler',
+  [Tab.USERS]: 'Gestão de Usuários',
 };
 
 const Header: React.FC<HeaderProps> = ({ 

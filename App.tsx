@@ -15,6 +15,7 @@ import EditorTab from './components/tabs/EditorTab';
 import GatewaysTab from './components/tabs/GatewaysTab';
 import SecurityTab from './components/tabs/SecurityTab';
 import LeadsTab from './components/tabs/LeadsTab';
+import { UsersTab } from './components/tabs/UsersTab';
 
 // Modals
 import ImportModal from './components/modals/ImportModal';
@@ -240,6 +241,8 @@ const App: React.FC = () => {
                 onRefresh={loadAccounts} 
               />
             )}
+
+            {activeTab === Tab.USERS && <UsersTab />}
           </ErrorBoundary>
         </div>
       </main>

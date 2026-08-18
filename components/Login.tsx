@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, ArrowRight, ShieldCheck, Zap } from 'lucide-react';
+import { Lock, Mail, ArrowRight, ShieldCheck, Zap } from 'lucide-react';
 
 interface LoginProps {
   onLoginSuccess: () => void;
@@ -7,6 +7,7 @@ interface LoginProps {
 }
 
 const Login: React.FC<LoginProps> = ({ onLoginSuccess, isDarkMode }) => {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -15,8 +16,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, isDarkMode }) => {
     e.preventDefault();
     setError('');
     
-    if (!password.trim()) {
-      setError('Por favor, insira a senha mestre.');
+    if (!email.trim() || !password.trim()) {
+      setError('Por favor, preencha o e-mail e a senha.');
       return;
     }
 
@@ -28,7 +29,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, isDarkMode }) => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ email, password }),
       });
 
       const data = await response.json();
@@ -40,9 +41,15 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, isDarkMode }) => {
         if (data.workspace) {
           sessionStorage.setItem('sf_workspace', data.workspace);
         }
+        if (data.role) {
+          sessionStorage.setItem('sf_role', data.role);
+        }
+        if (data.name) {
+          sessionStorage.setItem('sf_name', data.name);
+        }
         onLoginSuccess();
       } else {
-        setError(data.error || 'Senha incorreta.');
+        setError(data.error || 'Credenciais inválidas.');
         setPassword('');
       }
     } catch (err) {
@@ -81,19 +88,48 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, isDarkMode }) => {
               Social Flow
             </h1>
             <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-              Acesso restrito. Insira a senha mestre para continuar.
+              Acesso restrito. Faça login para continuar.
             </p>
           </div>
 
           {/* Form */}
-          <form onSubmit={handleLogin} className="space-y-6">
+          <form onSubmit={handleLogin} className="space-y-5">
             
+            <div className="space-y-2">
+              <label 
+                htmlFor="email" 
+                className={`text-xs font-bold uppercase tracking-wider ml-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}
+              >
+                E-mail
+              </label>
+              
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-indigo-500 transition-colors">
+                  <Mail size={18} />
+                </div>
+                
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="seu@email.com"
+                  className={`w-full pl-11 pr-4 py-3.5 rounded-xl text-sm transition-all duration-300 outline-none
+                    ${isDarkMode 
+                      ? 'bg-slate-800/50 border border-slate-700 text-white placeholder-slate-500 focus:bg-slate-800 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20' 
+                      : 'bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20'
+                    }`}
+                  autoFocus
+                />
+              </div>
+            </div>
+
             <div className="space-y-2">
               <label 
                 htmlFor="password" 
                 className={`text-xs font-bold uppercase tracking-wider ml-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}
               >
-                Senha Mestre
+                Senha
               </label>
               
               <div className="relative group">
@@ -112,7 +148,6 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, isDarkMode }) => {
                       ? 'bg-slate-800/50 border border-slate-700 text-white placeholder-slate-500 focus:bg-slate-800 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20' 
                       : 'bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20'
                     }`}
-                  autoFocus
                 />
               </div>
             </div>
@@ -127,7 +162,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, isDarkMode }) => {
             <button
               type="submit"
               disabled={isLoading}
-              className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-bold text-white transition-all duration-300
+              className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-bold text-white transition-all duration-300 mt-2
                 ${isLoading 
                   ? 'bg-indigo-400 cursor-not-allowed' 
                   : 'bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 hover:-translate-y-0.5 active:translate-y-0'

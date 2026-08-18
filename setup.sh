@@ -119,7 +119,15 @@ if [ -f "/root/socialflow/migration.sql" ]; then
     if [ -f "/root/supabase_keys.env" ]; then
         source /root/supabase_keys.env
         # Executa as migrações SQL no banco do Supabase
-        docker exec -e PGPASSWORD=$POSTGRES_PASSWORD -i supabase-db psql -U postgres -d postgres < /root/socialflow/migration.sql || echo "Aviso: Falha ao rodar migrações"
+        docker exec -e PGPASSWORD=$POSTGRES_PASSWORD -i supabase-db psql -U postgres -d postgres < /root/socialflow/migration.sql || echo "Aviso: Falha ao rodar migração 1"
+    fi
+fi
+
+if [ -f "/root/socialflow/migration2.sql" ]; then
+    if [ -f "/root/supabase_keys.env" ]; then
+        source /root/supabase_keys.env
+        # Executa a migração 2
+        docker exec -e PGPASSWORD=$POSTGRES_PASSWORD -i supabase-db psql -U postgres -d postgres < /root/socialflow/migration2.sql || echo "Aviso: Falha ao rodar migração 2"
     fi
 fi
 
