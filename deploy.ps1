@@ -18,7 +18,7 @@ if (Test-Path $zipFile) {
 }
 
 # Criar lista de arquivos para compactar de forma compatível
-$files = Get-ChildItem -Path . -Exclude "node_modules", ".git", "dist", "*.zip", "*.log", "scratch", ".gemini", ".agents"
+$files = Get-ChildItem -Path . -Force -Exclude "node_modules", ".git", "dist", "*.zip", "*.log", "scratch", ".gemini", ".agents"
 $filePaths = $files | ForEach-Object { $_.FullName }
 Compress-Archive -Path $filePaths -DestinationPath $zipFile -Force
 

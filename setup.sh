@@ -106,12 +106,20 @@ echo "   .env atualizado com chaves reais do Supabase."
 sed -i 's/\r$//' .env
 sed -i 's/\r$//' Caddyfile
 
-echo "8. Restaurando schema do banco de dados (se necessário)..."
+echo "8. Restaurando schema do banco de dados e migrações..."
 if [ -f "/root/socialflow/schema.sql" ]; then
     if [ -f "/root/supabase_keys.env" ]; then
         source /root/supabase_keys.env
         # Executa o schema SQL no banco do Supabase
         docker exec -e PGPASSWORD=$POSTGRES_PASSWORD -i supabase-db psql -U postgres -d postgres < /root/socialflow/schema.sql || echo "Aviso: Falha ao rodar schema (talvez já exista)"
+    fi
+fi
+
+if [ -f "/root/socialflow/migration.sql" ]; then
+    if [ -f "/root/supabase_keys.env" ]; then
+        source /root/supabase_keys.env
+        # Executa as migrações SQL no banco do Supabase
+        docker exec -e PGPASSWORD=$POSTGRES_PASSWORD -i supabase-db psql -U postgres -d postgres < /root/socialflow/migration.sql || echo "Aviso: Falha ao rodar migrações"
     fi
 fi
 

@@ -1,6 +1,8 @@
 
 import { extractMediaUrl } from "./services/mediaHelper";
 import express from "express";
+import crypto from "crypto";
+import rateLimit from "express-rate-limit";
 
 import { fetchPendingComments, updateScheduledCommentStatus, getAutoReplyConfig, supabase, fetchPostQueue, updatePostQueueStatus, scheduleComment, saveAutoReplyConfig, getPageAccessToken, fetchPendingFlowExecutions, updateFlowExecution, isCommentProcessed, markCommentAsProcessed, upsertLead, triggerFlowForLead, fetchAllFlows, resumeFlowExecutionOnUserReply } from "./services/supabaseService";
 import { postComment, sendPrivateReply, postToFacebook, sendRichMessageToPSID, fetchRecentPosts, fetchPostComments, fetchLeadProfile } from "./services/facebookService";
@@ -13,6 +15,30 @@ const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
 const COMMENT_CHECK_INTERVAL = () => 30000 + Math.random() * 10000; // 30-40 segundos (backup/fallback)
+
+// Session store for authenticated tokens
+const activeSessions = new Map<string, { createdAt: number, workspace: string }>();
+const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function createSessionToken(workspace: string): string {
+  const token = crypto.randomUUID();
+  activeSessions.set(token, { createdAt: Date.now(), workspace });
+  return token;
+}
+
+function isValidSession(token: string): { valid: boolean, workspace?: string } {
+  const session = activeSessions.get(token);
+  if (!session) return { valid: false };
+  if (Date.now() - session.createdAt > SESSION_TTL) {
+    activeSessions.delete(token);
+    return { valid: false };
+  }
+  return { valid: true, workspace: session.workspace };
+}
+
+// Flags to prevent Realtime listeners from spawning duplicate worker loops
+let commentWorkerStarted = false;
+let postQueueWorkerStarted = false;
 
 // Keep track of comments per page per day to protect from SPAM blocks
 const dailyCommentTracker: Record<string, { date: string; count: number }> = {};
@@ -143,7 +169,9 @@ async function processComments() {
     console.error("[Comment Robot] Error in background job:", err.message);
   } finally {
     isProcessingComments = false;
-    setTimeout(processComments, COMMENT_CHECK_INTERVAL());
+    if (commentWorkerStarted) {
+      setTimeout(processComments, COMMENT_CHECK_INTERVAL());
+    }
   }
 }
 
@@ -414,12 +442,12 @@ async function syncLeadsAndTriggerAutomationsBackground() {
                 await triggerFlowForLead(page.fb_id, comment.from.id, matchingFlow.id, comment.id);
                 await markCommentAsProcessed(comment.id, page.fb_id);
                 
-                await upsertLead({
-                  page_id: page.fb_id,
-                  psid: comment.from.id,
-                  name: comment.from.name,
-                  last_interaction: new Date().toISOString()
-                });
+                // await upsertLead({
+                //   page_id: page.fb_id,
+                //   psid: comment.from.id,
+                //   name: comment.from.name,
+                //   last_interaction: new Date().toISOString()
+                // });
                 continue;
               }
 
@@ -433,12 +461,12 @@ async function syncLeadsAndTriggerAutomationsBackground() {
                 await sendPrivateReply(comment.id, matchingAuto.reply_message, page.access_token);
                 await markCommentAsProcessed(comment.id, page.fb_id);
                 
-                await upsertLead({
-                  page_id: page.fb_id,
-                  psid: comment.from.id,
-                  name: comment.from.name,
-                  last_interaction: new Date().toISOString()
-                });
+                // await upsertLead({
+                //   page_id: page.fb_id,
+                //   psid: comment.from.id,
+                //   name: comment.from.name,
+                //   last_interaction: new Date().toISOString()
+                // });
               }
             }
           }
@@ -534,7 +562,9 @@ async function processPostQueue() {
               if (parsed && parsed.description) {
                 description = parsed.description;
               }
-            } catch (e) {}
+            } catch (e: any) {
+              console.warn("[PostQueue] Failed to parse media metadata:", e.message);
+            }
 
             logMsg(`Validando link da mídia via HEAD request: ${mediaUrl}`);
             try {
@@ -670,7 +700,8 @@ async function processPostQueue() {
                     access_token: page.access_token,
                     fb_post_id: res.id,
                     comment_text: parseSpintax(c.text),
-                    scheduled_time: schedTime
+                    scheduled_time: schedTime,
+                    workspace: item.workspace || 'admin'
                   });
                 }
               }
@@ -678,7 +709,7 @@ async function processPostQueue() {
               // Saving auto reply if any
               if (item.auto_reply_text) {
                  logMsg(`Saving auto-reply for ${page.name}...`);
-                 await saveAutoReplyConfig(page.fb_id, res.id, item.auto_reply_text, page.access_token);
+                 await saveAutoReplyConfig(page.fb_id, res.id, item.auto_reply_text, page.access_token, item.workspace || 'admin');
               }
   
               totalSuccess++;
@@ -736,20 +767,69 @@ async function processPostQueue() {
     console.error("[PostQueue] Error in processing queue:", err.message);
   } finally {
     isProcessingQueue = false;
-    setTimeout(processPostQueue, POST_QUEUE_INTERVAL);
+    if (postQueueWorkerStarted) {
+      setTimeout(processPostQueue, POST_QUEUE_INTERVAL);
+    }
   }
 }
 
 async function startServer() {
   const app = express();
+
+  // Rate limiter for login endpoint (anti brute-force)
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10, // max 10 attempts per window
+    message: { success: false, error: "Muitas tentativas. Tente novamente em 15 minutos." },
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
   
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
+  // Authentication Endpoints
+  app.get("/api/config/auth", (req, res) => {
+    const isAuthRequired = !!process.env.APP_PASSWORD && process.env.APP_PASSWORD.trim() !== "";
+    res.json({ authRequired: isAuthRequired });
+  });
+
+  app.post("/api/login", express.json({ limit: '1mb' }), loginLimiter, (req, res) => {
+    const { password, token } = req.body;
+    const adminPassword = process.env.APP_PASSWORD;
+    const friendPassword = process.env.FRIEND_PASSWORD;
+
+    if (!adminPassword || adminPassword.trim() === "") {
+      const newToken = createSessionToken('admin');
+      return res.json({ success: true, token: newToken, workspace: 'admin', message: "Auth not required" });
+    }
+
+    if (token) {
+      const session = isValidSession(token);
+      if (session.valid) {
+        return res.json({ success: true, token, workspace: session.workspace });
+      }
+    }
+
+    if (password === adminPassword) {
+      const newToken = createSessionToken('admin');
+      return res.json({ success: true, token: newToken, workspace: 'admin' });
+    } else if (friendPassword && password === friendPassword) {
+      const newToken = createSessionToken('amigo');
+      return res.json({ success: true, token: newToken, workspace: 'amigo' });
+    } else {
+      return res.status(401).json({ success: false, error: "Senha incorreta" });
+    }
+  });
+
   // Facebook Webhook Verification
   app.get("/api/webhook/facebook", (req, res) => {
-    const VERIFY_TOKEN = process.env.FB_WEBHOOK_VERIFY_TOKEN || "socialflow_secret_token";
+    const VERIFY_TOKEN = process.env.FB_WEBHOOK_VERIFY_TOKEN;
+    if (!VERIFY_TOKEN) {
+      console.error("[Webhook] FB_WEBHOOK_VERIFY_TOKEN not set in .env");
+      return res.sendStatus(500);
+    }
     const mode = req.query["hub.mode"];
     const token = req.query["hub.verify_token"];
     const challenge = req.query["hub.challenge"];
@@ -767,12 +847,13 @@ async function startServer() {
   });
 
   // Facebook Webhook Event Receiver
-  app.post("/api/webhook/facebook", express.json(), async (req, res) => {
+  app.post("/api/webhook/facebook", express.json({ limit: '5mb' }), async (req, res) => {
     const body = req.body;
 
     if (body.object === "page") {
       res.status(200).send("EVENT_RECEIVED");
 
+      if (!Array.isArray(body.entry)) return;
       for (const entry of body.entry) {
         // 1. Process Messages (Messenger Webhook)
         if (entry.messaging) {
@@ -799,13 +880,13 @@ async function startServer() {
                 }
 
                 // Update lead last interaction & name
-                await upsertLead({
-                  page_id: pageId,
-                  psid: senderId,
-                  name: name,
-                  profile_pic: profilePic,
-                  last_interaction: new Date().toISOString()
-                });
+                // await upsertLead({
+                //   page_id: pageId,
+                //   psid: senderId,
+                //   name: name,
+                //   profile_pic: profilePic,
+                //   last_interaction: new Date().toISOString()
+                // });
 
                 // Resume/wake up the flow execution (e.g. if it was waiting for the 24h window)
                 await resumeFlowExecutionOnUserReply(pageId, senderId);
@@ -851,12 +932,12 @@ async function startServer() {
                   console.log(`[Webhook] [Flow Match] Page: ${pageId}, Flow: ${matchingFlow.name}, User: ${sender.name}`);
                   
                   // Upsert lead details in CRM
-                  await upsertLead({
-                    page_id: pageId,
-                    psid: sender.id,
-                    name: sender.name,
-                    last_interaction: new Date().toISOString()
-                  });
+                  // await upsertLead({
+                  //   page_id: pageId,
+                  //   psid: sender.id,
+                  //   name: sender.name,
+                  //   last_interaction: new Date().toISOString()
+                  // });
 
                   // Trigger flow execution
                   await triggerFlowForLead(pageId, sender.id, matchingFlow.id, commentId);
@@ -987,8 +1068,10 @@ async function startServer() {
       .subscribe();
 
     console.log("[Comment Robot] Starting orchestration...");
+    commentWorkerStarted = true;
     processComments();
     console.log("[PostQueue Robot] Starting queue processor...");
+    postQueueWorkerStarted = true;
     processPostQueue();
     
     console.log("[Flow Robot] Starting flow executions worker...");

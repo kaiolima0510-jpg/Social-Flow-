@@ -22,9 +22,56 @@ import GroupModal from './components/modals/GroupModal';
 import ScheduleModal from './components/modals/ScheduleModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import QueuePanel from './components/QueuePanel';
+import Login from './components/Login';
 
 const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
+  const [isAuthenticated, setIsAuthenticated] = React.useState<boolean | null>(null);
+
+  React.useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/config/auth');
+        const data = await res.json();
+        
+        if (!data.authRequired) {
+          setIsAuthenticated(true);
+          return;
+        }
+
+        const savedToken = sessionStorage.getItem('sf_session_token');
+        if (savedToken) {
+          // Validate the saved session token with a quick login check
+          const loginRes = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${savedToken}`
+            },
+            body: JSON.stringify({ token: savedToken }),
+          });
+          const loginData = await loginRes.json();
+          if (loginData.success) {
+            if (loginData.workspace) {
+              sessionStorage.setItem('sf_workspace', loginData.workspace);
+            }
+            setIsAuthenticated(true);
+          } else {
+            setIsAuthenticated(false);
+            sessionStorage.removeItem('sf_session_token');
+            sessionStorage.removeItem('sf_workspace');
+          }
+        } else {
+          setIsAuthenticated(false);
+        }
+      } catch (err) {
+        console.error("Auth check failed:", err);
+        setIsAuthenticated(false);
+      }
+    };
+    checkAuth();
+  }, []);
+
 
   const {
     activeTab, setActiveTab,
@@ -64,6 +111,19 @@ const App: React.FC = () => {
   const activeQueueCount = postQueue.filter(
     (i: any) => i.status === 'pending' || i.status === 'processing'
   ).length;
+
+  if (isAuthenticated === null) {
+    return (
+      <div className={`h-screen flex flex-col items-center justify-center ${isDarkMode ? 'bg-[#020617] text-white' : 'bg-[#F8FAFC] text-slate-900'}`}>
+        <div className="w-8 h-8 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mb-4" />
+        <p className="text-sm font-medium animate-pulse">Carregando ambiente seguro...</p>
+      </div>
+    );
+  }
+
+  if (isAuthenticated === false) {
+    return <Login onLoginSuccess={() => setIsAuthenticated(true)} isDarkMode={isDarkMode} />;
+  }
 
   return (
     <div className={`flex h-screen ${isDarkMode ? 'bg-[#020617]' : 'bg-[#F8FAFC]'} transition-colors duration-300 overflow-hidden font-sans`}>

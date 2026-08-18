@@ -1,14 +1,27 @@
 
 import { createClient } from '@supabase/supabase-js';
+
+export const getWorkspace = () => {
+  if (typeof window !== 'undefined') {
+    return sessionStorage.getItem('sf_workspace') || 'admin';
+  }
+  return null;
+};
+
+export const withWs = (query: any) => {
+  const ws = getWorkspace();
+  if (ws) return query.eq('workspace', ws);
+  return query;
+};
 import { Lead, Message, PageGroup } from '../types';
 
 // Robust environment variable loading for both Vite and Node
 const getEnv = (name: string) => {
-  if (typeof import.meta !== 'undefined' && import.meta.env) {
-    if (name === 'VITE_SUPABASE_URL') return import.meta.env.VITE_SUPABASE_URL;
-    if (name === 'VITE_SUPABASE_ANON_KEY') return import.meta.env.VITE_SUPABASE_ANON_KEY;
-    if (name === 'PORT') return import.meta.env.PORT;
-    if (name === 'VITE_BACKEND_URL') return import.meta.env.VITE_BACKEND_URL;
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+    if (name === 'VITE_SUPABASE_URL') return (import.meta as any).env.VITE_SUPABASE_URL;
+    if (name === 'VITE_SUPABASE_ANON_KEY') return (import.meta as any).env.VITE_SUPABASE_ANON_KEY;
+    if (name === 'PORT') return (import.meta as any).env.PORT;
+    if (name === 'VITE_BACKEND_URL') return (import.meta as any).env.VITE_BACKEND_URL;
   }
   if (typeof process !== 'undefined' && process.env && process.env[name]) {
     return process.env[name];
@@ -35,7 +48,12 @@ export const fetchAccountsFromCloud = async () => {
     // Tentamos buscar primeiro em fb_pages, que é onde o usuário confirmou que os dados estão.
     const { data: pagesData, error: pagesError } = await supabase.from('fb_pages').select('*');
     
-    if (!pagesError && pagesData && pagesData.length > 0) {
+    if (pagesError) {
+      console.error("fetchAccountsFromCloud pagesError:", pagesError);
+      throw new Error(`Erro fb_pages: ${pagesError.message}`);
+    }
+
+    if (pagesData && pagesData.length > 0) {
       // Agrupamos as páginas por account_id para manter a compatibilidade com a UI
       const accountsMap: Record<string, any> = {};
       
@@ -70,8 +88,8 @@ export const fetchAccountsFromCloud = async () => {
 
     const { data, error } = await supabase.from('fb_accounts').select('*');
     if (error) {
-      console.error("fetchAccountsFromCloud Error:", error);
-      return [];
+      console.error("fetchAccountsFromCloud fb_accounts Error:", error);
+      throw new Error(`Erro fb_accounts: ${error.message}`);
     }
     
     return (data || []).map(row => {
@@ -93,9 +111,9 @@ export const fetchAccountsFromCloud = async () => {
         ]
       };
     });
-  } catch (e) {
+  } catch (e: any) {
     console.error("fetchAccountsFromCloud Crash:", e);
-    return [];
+    throw e; // Rethrow to show in the UI logs
   }
 };
 
@@ -141,7 +159,8 @@ export const saveFullAccount = async (acc: { name: string, token: string, pages:
       fb_id: p.fb_id,
       name: p.name,
       access_token: p.access_token,
-      category: p.category || ""
+      category: p.category || "",
+      workspace: getWorkspace() || 'admin'
     })).filter(p => !!p.access_token);
 
     if (pagesToInsert.length === 0) {
@@ -326,7 +345,8 @@ export const scheduleComment = async (comment: any) => {
     fb_post_id: comment.fb_post_id,
     comment_text: comment.comment_text,
     scheduled_time: comment.scheduled_time,
-    status: 'pending'
+    status: 'pending',
+    workspace: comment.workspace || 'admin'
   });
 };
 
@@ -406,14 +426,15 @@ export const updateScheduledCommentStatus = async (
   return !error;
 };
 
-export const saveAutoReplyConfig = async (pageId: string, fbPostId: string, replyText: string, token: string) => {
+export const saveAutoReplyConfig = async (pageId: string, fbPostId: string, replyText: string, token: string, workspace: string = 'admin') => {
   const { error } = await supabase
     .from('post_auto_replies')
     .insert({
       page_id: pageId,
       fb_post_id: fbPostId,
       reply_text: replyText,
-      access_token: token
+      access_token: token,
+      workspace
     });
   if (error) {
     console.error("Erro ao salvar config de auto-reply:", error);

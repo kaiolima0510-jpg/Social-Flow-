@@ -436,7 +436,7 @@ const LeadsTab: React.FC<LeadsTabProps> = ({ accounts, isDarkMode, addSecurityLo
     setIsUploadingFile(true);
     addSecurityLog("FILE: Iniciando upload do arquivo para o Supabase...");
     try {
-      const url = await uploadMediaToStorage(file);
+      const { url, error: uploadError } = await uploadMediaToStorage(file);
       if (url) {
         const updatedSteps = [...editingFlow.steps];
         if (cardIndex !== undefined) {
@@ -447,7 +447,7 @@ const LeadsTab: React.FC<LeadsTabProps> = ({ accounts, isDarkMode, addSecurityLo
         setEditingFlow({ ...editingFlow, steps: updatedSteps });
         addSecurityLog("FILE: Arquivo enviado com sucesso!");
       } else {
-        addSecurityLog("FAIL: Não foi possível subir o arquivo.");
+        addSecurityLog(`FAIL: Não foi possível subir o arquivo. Motivo: ${uploadError ?? 'desconhecido'}`);
       }
     } catch (err: any) {
       addSecurityLog(`FAIL: Erro de upload: ${err.message}`);

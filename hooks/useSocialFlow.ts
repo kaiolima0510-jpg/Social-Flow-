@@ -474,11 +474,16 @@ export const useSocialFlow = () => {
             type: 'IMAGE' as const,
             description: ""
           };
-          setManualData(prev => ({ 
-            ...prev, 
-            media: prev.type === 'ALBUM' ? [...prev.media, newMedia] : [newMedia],
-            type: prev.type === 'VIDEO' ? 'SINGLE' : prev.type
-          }));
+          setManualData(prev => {
+            if (prev.type !== 'ALBUM') {
+              prev.media.forEach(m => URL.revokeObjectURL(m.preview));
+            }
+            return { 
+              ...prev, 
+              media: prev.type === 'ALBUM' ? [...prev.media, newMedia] : [newMedia],
+              type: prev.type === 'VIDEO' ? 'SINGLE' : prev.type
+            };
+          });
           addSecurityLog("MEDIA: Imagem colada da área de transferência.");
         }
       }
@@ -797,17 +802,20 @@ export const useSocialFlow = () => {
           addSecurityLog(`HASHING: Alterando assinatura do vídeo ${m.file.name}...`);
           fileToUpload = await uniqueVideoHash(m.file);
         }
-        const url = await uploadMediaToStorage(fileToUpload);
+        const { url, error: uploadError } = await uploadMediaToStorage(fileToUpload);
         if (url) {
           mediaUrls.push(JSON.stringify({
             url: url,
             description: m.description || ""
           }));
+        } else {
+          addSecurityLog(`FAIL: Falha no upload de "${m.file.name}". Motivo: ${uploadError ?? 'desconhecido'}`);
+          break;
         }
       }
       
       if (mediaUrls.length !== manualData.media.length) {
-         addSecurityLog(`FAIL: Falha no upload de mídia. Tente novamente.`);
+         addSecurityLog(`FAIL: Abortando — não foi possível subir todas as mídias.`);
          return;
       }
 
@@ -817,7 +825,7 @@ export const useSocialFlow = () => {
          type: manualData.type,
          caption: manualData.caption,
          comments: manualData.comments.map(c => ({
-           text: c.useSpintax ? `${spintaxTemplates} ${c.text}` : c.text,
+           text: c.useSpintax ? `${parseSpintax(spintaxTemplates)} ${c.text}` : c.text,
            delay: c.delay
          })),
          autoReplyText: manualData.autoReplyText,

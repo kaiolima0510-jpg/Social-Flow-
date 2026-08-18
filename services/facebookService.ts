@@ -1,7 +1,7 @@
 
 import { FacebookPage } from '../types';
 
-const FB_GRAPH_URL = 'https://graph.facebook.com/v18.0';
+const FB_GRAPH_URL = 'https://graph.facebook.com/v21.0';
 
 // Headers que simulam o app móvel do Facebook para evitar detecção bot
 const BROWSER_HEADERS = {
@@ -92,13 +92,7 @@ export const createUniqueBinaryHash = async (file: File): Promise<Blob> => {
     newBuffer[view.length + i] = Math.floor(Math.random() * 256);
   }
   
-  // Também modifica 2 bytes em posições aleatórias no meio do arquivo
-  // (fora dos primeiros 1KB que contêm o header do container)
-  if (view.length > 2048) {
-    const mid = 1024 + Math.floor(Math.random() * (view.length / 2));
-    newBuffer[mid] ^= 0x01; // XOR bit flip — altera sem corromper
-    newBuffer[mid + 1] ^= 0x01;
-  }
+
   
   return new Blob([newBuffer], { type: file.type });
 };
